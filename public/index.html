@@ -2,14 +2,14 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0c101b">
-<title>STELLAR · 함께 빛나는 커뮤니티</title>
+<title>STELLAR · 서버 관리</title>
 <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/social.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#content">본문으로 건너뛰기</a>
 <aside>
- <a class="brand" href="/" aria-label="STELLAR 홈"><span class="brand-mark" aria-hidden="true">✦</span><span>stellar<small>YOUR COMMUNITY, BRIGHTER.</small></span></a>
- <div class="workspace"><span class="server-icon" aria-hidden="true">🪐</span><div><strong>우리의 작은 우주</strong><small id="connection">연결 상태 확인 중</small></div></div>
+ <a class="brand" href="/" aria-label="STELLAR 홈"><span class="brand-mark" aria-hidden="true">✦</span><span>stellar<small>SERVER DASHBOARD</small></span></a>
+ <div class="workspace"><span class="server-icon" aria-hidden="true">🪐</span><div><strong>내 서버</strong><small id="connection">연결 상태 확인 중</small></div></div>
  <div class="nav-caption">WORKSPACE</div>
  <nav aria-label="메인 메뉴">
   <button data-page="overview" class="selected" aria-current="page"><span class="nav-icon" aria-hidden="true">🏠</span><span>홈</span></button>
@@ -20,18 +20,17 @@
   <button data-page="settings" data-admin hidden><span class="nav-icon" aria-hidden="true">⚙️</span><span>서버 설정</span></button>
   <button data-page="logs" data-admin hidden><span class="nav-icon" aria-hidden="true">📋</span><span>운영 기록</span></button>
  </nav>
- <div class="side-bottom"><div class="constellation" aria-hidden="true">✧ · ˚　✦　˚ · ✧</div><strong>함께할수록 빛나는 곳.</strong><p>대화하고, 플레이하고,<br>우리만의 기록을 쌓아요.</p><span class="version">STELLAR / COMMUNITY</span></div>
+ <div class="side-bottom"><span class="version">STELLAR</span></div>
 </aside>
 <main>
- <header><div><div class="eyebrow">MY SPACE <span class="divider">/</span> <span id="crumb">OVERVIEW</span></div><h1 id="page-title">우리 서버 한눈에 <span aria-hidden="true">✦</span></h1></div><div class="header-right"><span id="identity">반가워요 👋</span><button id="refresh" class="icon" aria-label="새로고침" title="새로고침">↻</button><button id="logout" hidden>로그아웃</button></div></header>
+ <header><div><div class="eyebrow">MY SPACE <span class="divider">/</span> <span id="crumb">OVERVIEW</span></div><h1 id="page-title">대시보드</h1></div><div class="header-right"><span id="identity">로그인 전</span><button id="refresh" class="icon" aria-label="새로고침" title="새로고침">↻</button><button id="logout" hidden>로그아웃</button></div></header>
  <div id="notice" role="status" aria-live="polite"></div>
  <section id="login" class="panel login-panel">
-  <div class="login-copy"><span class="tag">✦ WELCOME TO STELLAR</span><h2>우리 서버의<br><span>빛나는 일상.</span></h2><p>작은 대화부터 즐거운 한 판까지.<br>함께 쌓은 순간을 띵조코인와 보상으로 만나보세요.</p><a href="/auth/login" class="button primary" id="discord-login">Discord로 시작하기 <span aria-hidden="true">↗</span></a><p id="login-hint" class="muted"></p></div>
-  <div class="stellar-art" aria-hidden="true"><div class="orbit-ring ring-one"></div><div class="orbit-ring ring-two"></div><div class="planet">✦</div><span class="satellite s-one">🎮</span><span class="satellite s-two">💎</span><span class="star star-one">✧</span><span class="star star-two">✦</span></div>
+  <div class="login-copy"><h2>로그인</h2><p>서버 정보와 관리 기능을 확인하려면 로그인하세요.</p><a href="/auth/login" class="button primary" id="discord-login">Discord로 시작하기 <span aria-hidden="true">↗</span></a><p id="login-hint" class="muted"></p></div>
   <details id="local-login"><summary>🔑 관리자 연결</summary><form id="login-form"><label>관리자 토큰<input id="token" type="password" autocomplete="off" required placeholder="관리자 토큰을 입력하세요"></label><button class="primary">관리 화면 열기</button></form></details>
  </section>
  <div id="content" tabindex="-1"></div>
- <footer><a href="/">✦ stellar</a><span>함께 쌓는 즐거움. 함께 만드는 기록.</span><span>가상 띵조코인 전용</span></footer>
+ <footer><a href="/">✦ stellar</a><span>가상 띵조코인 전용</span></footer>
 </main>
 <dialog id="modal" aria-labelledby="modal-title"><button id="close-modal" class="close" aria-label="닫기">×</button><div id="modal-body"></div></dialog>
 </body></html>
