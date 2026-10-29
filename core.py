@@ -15,7 +15,11 @@ import games
 import social
 
 ROOT=Path(__file__).resolve().parent
-DB=os.getenv('DB_PATH',str(ROOT/'bot.db'))
+def database_path():
+ path=Path(os.getenv('DB_PATH','bot.db')).expanduser()
+ return str(path if path.is_absolute() else ROOT/path)
+
+DB=database_path()
 DEFAULTS=dict(chatXP=25,cooldown=60,voiceXP=12,attendanceXP=50,streakBonus=10,streakCap=7,
  minBet=10,maxBet=10000,casino=True,gameCooldown=5,gameTimeout=900,levelBase=100,
  timezone='Asia/Seoul',excludedChannels=[],excludedRoles=[],casinoChannels=[],casinoRoles=[],adminRoles=[],
@@ -262,7 +266,9 @@ def operate(actor,path,b,admin=False,context=None):
      # Browser play is disabled if a channel-only casino policy is configured.
      if s['casinoChannels'] and context.get('channel') not in s['casinoChannels']:raise PermissionError('지정된 디스코드 채널에서 플레이하세요')
     bet=integer(b.get('bet'),max(s['minBet'],cfg['minBet']),min(s['maxBet'],cfg['maxBet']))
-    if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요')
+    expire_rounds(c,time.time(),uid)
+    if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
+    if user(c,uid)['xp']<bet:raise ValueError('베팅할 경험치가 부족해요. /출석 또는 채팅 활동으로 경험치를 모은 뒤 /내정보에서 잔액을 확인하세요')
     cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'));adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
@@ -345,12 +351,18 @@ def state(uid=None,admin=False):
    jobs=[dict(r) for r in c.execute("SELECT id,kind,status,error,created FROM jobs WHERE status!='done' ORDER BY id DESC LIMIT 50")] if admin else [],
    catalog={k:dict(name=v[0],rules=v[1],interactive=v[2]) for k,v in games.CATALOG.items()},me=user(c,uid) if uid and c.execute('SELECT 1 FROM users WHERE id=?',(uid,)).fetchone() else None)
 
+def expire_rounds(c,now,uid=None):
+ query="SELECT * FROM game_rounds WHERE status='active' AND expires<?"
+ params=(now,)
+ if uid is not None:query+=' AND uid=?';params+=(uid,)
+ for r in c.execute(query,params).fetchall():
+  st=json.loads(r['state']);games.finish(st,0,'제한 시간 초과: 베팅금 소멸');settle(c,r,st)
+
 def maintenance():
  with db(True) as c:
   now=time.time()
   social.maintenance(c,settings(c),now)
-  for r in c.execute("SELECT * FROM game_rounds WHERE status='active' AND expires<?",(now,)).fetchall():
-   st=json.loads(r['state']);games.finish(st,0,'제한 시간 초과: 베팅금 소멸');settle(c,r,st)
+  expire_rounds(c,now)
   expired=c.execute("SELECT * FROM orders WHERE status='active' AND expires IS NOT NULL AND expires<?",(now,)).fetchall()
   for r in expired:c.execute("UPDATE orders SET status='expired' WHERE id=?",(r['id'],));job(c,'roles',dict(uid=r['uid']))
   season=c.execute("SELECT * FROM seasons WHERE status='active'").fetchone()
@@ -371,3 +383,4 @@ def desired_roles(uid):
   return want,managed,u,s
 
 init()
+

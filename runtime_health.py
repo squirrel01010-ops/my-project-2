@@ -11,9 +11,13 @@ def check():
   if response.status!=200:raise RuntimeError('Web health check failed')
  finally:conn.close()
  if os.getenv('DISCORD_TOKEN') or os.getenv('REQUIRE_DISCORD')=='1':
-  with sqlite3.connect('file:'+os.environ.get('DB_PATH','bot.db')+'?mode=ro',uri=True) as c:
+  from pathlib import Path
+  path=Path(os.environ.get('DB_PATH','bot.db')).expanduser()
+  if not path.is_absolute():path=Path(__file__).resolve().parent/path
+  with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True) as c:
    row=c.execute("SELECT value FROM meta WHERE key='heartbeat'").fetchone()
   if not row or time.time()-float(row[0])>180:raise RuntimeError('Discord heartbeat missing')
 if __name__=='__main__':
  try:check()
  except Exception as e:raise SystemExit(type(e).__name__+': service not healthy')
+
