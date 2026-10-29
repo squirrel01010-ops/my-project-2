@@ -76,13 +76,11 @@ def game_embed(r):
  else:e.description=game_motion.board(r)
  if s.get('message'):e.description+='\n'+s['message']
  if done:
-  raw=int(r['bet']*s.get('mult',0));fee=max(0,raw-r.get('payout',0))
-  e.add_field(name='손실' if r['payout']<r['bet'] else '수익',value=f"**{abs(r['payout']-r['bet']):,}** 띵조코인",inline=True)
-  e.add_field(name='수수료',value=f"**{fee:,}** 띵조코인",inline=True)
+  e.add_field(name=('📉 손실' if r['payout']<r['bet'] else '💰 수익')+f" (수수료 {r.get('fee',0)}%)",value=f"**{r['payout']-r['bet']:+,}** 띵조코인",inline=True)
  else:e.add_field(name='베팅',value=f"{r['bet']:,} 띵조코인",inline=True)
  if r.get('uid'):
   with core.db() as c:balance=core.user(c,r['uid'])['xp']
-  e.add_field(name='보유 코인',value=f"**{balance:,}** 띵조코인",inline=False)
+  e.add_field(name='🪙 보유 코인',value=f"**{balance:,}** 띵조코인",inline=False)
  return e
 
 def game_view(r):

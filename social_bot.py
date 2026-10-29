@@ -21,7 +21,7 @@ STREET={'preflop':'첫 베팅','flop':'플롭','turn':'턴','river':'리버'}
 
 def balance_text(uid):
  with core.db() as c:row=c.execute('SELECT xp FROM users WHERE id=?',(uid,)).fetchone()
- return f"보유 코인 **{row[0]:,}** 띵조코인" if row else ''
+ return f"🪙 보유 코인 **{row[0]:,}** 띵조코인" if row else ''
 
 def embed(s):
  kind=s['kind'];e=discord.Embed(title=social.CATALOG[kind]['name'],color=0xa28aff)
@@ -34,7 +34,7 @@ def embed(s):
    if s['status']=='active':e.add_field(name='현재 차례',value=f"{s['players'][s['turn']]['name']} · <t:{int(s['deadline'])}:R>")
   for p in s['players']:
    cards=' '.join(p.get('cards',[]));line=f"남은 칩 {p['stack']:,} · 이번 라운드 {p.get('round',0):,}"+(' · 폴드' if p.get('folded') else '')
-   if s['status']=='done':line=f"수익 {max(0,s['payouts'].get(p['uid'],0)-s['buyin']):,} · 수수료 0 띵조코인\n"+balance_text(p['uid'])
+   if s['status']=='done':line=f"💰 수익 {s['payouts'].get(p['uid'],0)-s['buyin']:+,} 띵조코인 (수수료 0%)\n"+balance_text(p['uid'])
    e.add_field(name=p['name'][:100],value=f'{cards}\n{line}',inline=False)
   e.set_footer(text='내 패는 [내 카드]에서만 비공개 확인 · 턴 초과 시 가능하면 체크, 아니면 폴드')
  elif kind=='lottery':
@@ -46,7 +46,7 @@ def embed(s):
   lines=[]
   for p in s['players'][:25]:
    status=f"✅ {p.get('at',0):.2f}배 정산" if p['status']=='cashed' else '💥 패배' if p['status']=='lost' else f"자동 {p['auto']/100:.2f}배" if p['auto'] else '수동 정산'
-   lines.append(f"{p['name'][:30]} · {status}\n수익 {max(0,p.get('payout',0)-p['bet']):,} · 수수료 0 띵조코인\n"+balance_text(p['uid']))
+   lines.append(f"{p['name'][:30]} · {status}\n💰 수익 {(p.get('payout',0)-p['bet'] if p['status'] in ('cashed','lost') else 0):+,} 띵조코인 (수수료 0%)\n"+balance_text(p['uid']))
   e.add_field(name=f"참가자 {len(s['players'])}명",value='\n'.join(lines)[:1024] or '모집 중',inline=False)
   e.set_footer(text='자동 정산 배당을 정해 두면 목표 배당에서 자동으로 정산돼요.')
  return e
@@ -115,8 +115,11 @@ async def handle(i):
    s=await asyncio.to_thread(social.read,kind,rid,str(i.user.id));p=next((p for p in s['players'] if p['uid']==str(i.user.id)),None)
    await i.followup.send('내 카드: '+' '.join(p['cards']) if p else '이 테이블의 참가자가 아닙니다.',ephemeral=True);return True
   if action=='tickets':
-   with core.db() as c:rows=c.execute('SELECT numbers,payout,price FROM lottery_tickets WHERE draw=? AND uid=?',(rid,str(i.user.id))).fetchall()
-   await i.followup.send(('\n'.join(f"{r['numbers']} · 수익 {max(0,r['payout']-r['price']):,} 띵조코인" for r in rows)[:1700] or '구매한 복권이 없어요.')+'\n'+balance_text(str(i.user.id)),ephemeral=True);return True
+   with core.db() as c:
+    rows=c.execute('SELECT numbers,payout,price FROM lottery_tickets WHERE draw=? AND uid=?',(rid,str(i.user.id))).fetchall()
+    draw=c.execute("SELECT state FROM live_games WHERE id=? AND kind='lottery'",(rid,)).fetchone()
+   fee=json.loads(draw[0]).get('fee',0) if draw else 0
+   await i.followup.send(('\n'.join(f"{r['numbers']} · 💰 수익 {r['payout']-r['price']:+,} 띵조코인 (수수료 {fee}%)" for r in rows)[:1700] or '구매한 복권이 없어요.')+'\n'+balance_text(str(i.user.id)),ephemeral=True);return True
   if kind=='lottery' and action=='auto':
    r=await op(i,'lottery/buy',dict(draw=rid));await i.followup.send('구매 번호: '+str(r['tickets'][0]['numbers']),ephemeral=True);return True
   if action=='refresh':s=await asyncio.to_thread(social.read,kind,rid)
@@ -188,4 +191,3 @@ def register(client,tree,guild_id):
   with core.db() as c:r=c.execute("SELECT id FROM live_games WHERE kind='crash' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone()
   if not r:return await i.followup.send('이 채널에는 크래시 기록이 없어요.',ephemeral=True)
   await publish(i,await asyncio.to_thread(social.read,'crash',r['id']))
-
