@@ -23,7 +23,7 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
       with core.db() as c:r=c.execute('SELECT * FROM game_rounds ORDER BY rowid DESC LIMIT 1').fetchone()
       if r['status']=='done':break
       self.assertTrue(view.children,game)
-      b=next((b for b in view.children if b.label=='멈추기'),None) or next((b for b in view.children if b.label=='콜'),None) or next((b for b in view.children if b.label=='정산' and core.round_view(r)['state']['step']>0),None) or view.children[0]
+      b=next((b for b in view.children if b.label=='멈추기'),None) or next((b for b in view.children if b.label=='콜'),None) or next((b for b in view.children if b.label=='정산' and core.round_view(r)['state']['step']>0),None) or next(b for b in view.children if not b.disabled)
       serial+=1
       i.id=serial;i.type=bot.discord.InteractionType.component;i.data={'custom_id':b.custom_id};i.followup=SimpleNamespace(send=AsyncMock())
       await bot.on_interaction(i)

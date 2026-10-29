@@ -39,6 +39,22 @@ async def decorate_round(i,r):
 
 def game_embed(r):
  s=r['state'];done=r['status']=='done';net=r.get('payout',0)-r['bet']
+ if r['game'] not in ('roulette','wheel'):
+  result='승리' if net>0 else '패배' if net<0 else '무승부'
+  title=games.CATALOG[r['game']][0]+(' · '+result if done else '')
+  e=discord.Embed(title=title,description=game_motion.board(r),color=(0x57b894 if net>0 else 0xd66b78 if net<0 else 0x8b94a8) if done else 0x7289da)
+  e.add_field(name='베팅',value=f"{r['bet']:,} EXP")
+  if done:e.add_field(name='정산',value=f"**{net:+,} EXP**\n반환 {r['payout']:,} EXP")
+  elif s.get('mult',0):
+   mult=s['mult'];mult=1+(mult-1)*s.get('profitScale',1) if mult>1 else mult
+   e.add_field(name='현재 배당',value=f"**×{mult:.2f}**")
+  if 'balance' in r:e.add_field(name='잔액',value=f"{r['balance']:,} EXP")
+  if s.get('message'):e.add_field(name='결과' if done else '진행 상황',value=s['message'],inline=False)
+  footer=[r.get('display_name','게임')]
+  if s.get('winChance') is not None:footer.append(f"당첨 확률 {s['winChance']:g}%")
+  if s.get('profitScale',1)!=1:footer.append(f"승리 수익 ×{s['profitScale']:g}")
+  if not done:footer.append('아래 버튼으로 선택하세요')
+  e.set_footer(text=' · '.join(footer));return e
  e=discord.Embed(title=games.CATALOG[r['game']][0],color=(0x2ecc71 if net>=0 else 0xe74c3c) if done else 0x9d85ff)
  if r['game']=='wheel' and done:e.title=f"🎡 돌림판 → ×{s.get('wheelMultipliers',[0,0,0,0,1,1,2,4])[s['segment']]} 당첨!"
  e.description=f"베팅 **{r['bet']:,} EXP** · {'종료' if r['status']=='done' else '진행 중'}\n{s.get('message','')}"
@@ -73,10 +89,13 @@ def game_view(r):
  elif g=='baskin':controls=[(str(n)+'개 세기','count',str(n)) for n in (1,2,3)]
  elif g in ('mines','bomb','tower','ttt'):
   n={'mines':9,'bomb':5,'tower':3,'ttt':9}[g]
-  controls=[(str(n+1),'pick',str(n)) for n in range(n) if (g not in ('mines','bomb') or n not in s['opened']) and (g!='ttt' or not s['board'][n])]
+  controls=[(str(n+1),'pick',str(n)) for n in range(n)]
   if g!='ttt':controls.append(('정산','cashout',''))
  for label,act,value in controls:
-  view.add_item(discord.ui.Button(label=label,custom_id=f"orbit:{r['id']}:{r['revision']}:{act}:{value}",style=discord.ButtonStyle.primary if act=='cashout' else discord.ButtonStyle.secondary))
+  used=act=='pick' and ((g in ('mines','bomb') and int(value) in s['opened']) or (g=='ttt' and bool(s['board'][int(value)])))
+  if used:label=s['board'][int(value)] if g=='ttt' else '◆'
+  row=(int(value)//3 if act=='pick' else 3) if g in ('mines','ttt') else None
+  view.add_item(discord.ui.Button(label=label,custom_id=f"orbit:{r['id']}:{r['revision']}:{act}:{value}",disabled=used,row=row,style=discord.ButtonStyle.primary if act=='cashout' else discord.ButtonStyle.secondary))
  return view
 
 @client.event
@@ -100,7 +119,12 @@ async def on_interaction(i):
    return await i.followup.send('결과 연출 중이에요. 잠시 후 눌러주세요.',ephemeral=True)
   game_motion.BUSY.add(rid)
   try:
+   def previous_state():
+    with core.db() as c:row=c.execute('SELECT * FROM game_rounds WHERE id=? AND uid=?',(rid,str(i.user.id))).fetchone()
+    return core.round_view(row)['state'] if row else {}
+   previous=await asyncio.to_thread(previous_state)
    r=await operation(i,'game/action',dict(round=rid,revision=int(rev),action=act,value=int(value) if value else None))
+   r['previous_state']=previous
    await decorate_round(i,r)
    if act=='cashout':await i.edit_original_response(embed=game_embed(r),view=game_view(r))
    else:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
