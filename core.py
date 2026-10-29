@@ -57,6 +57,7 @@ def init():
   CREATE TABLE IF NOT EXISTS game_rounds(id TEXT PRIMARY KEY,uid TEXT,game TEXT,bet INTEGER,state TEXT,fee INTEGER,revision INTEGER DEFAULT 0,created REAL,expires REAL,status TEXT,payout INTEGER DEFAULT 0);
   CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY,name TEXT,price INTEGER,kind TEXT,role_id TEXT,duration INTEGER,stock INTEGER,active INTEGER DEFAULT 1);
   CREATE TABLE IF NOT EXISTS inventory(id INTEGER PRIMARY KEY,product_id INTEGER,code TEXT,order_id TEXT);
+  CREATE INDEX IF NOT EXISTS inventory_product_code ON inventory(product_id,code);
   CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY,uid TEXT,product_id INTEGER,name TEXT,kind TEXT,role_id TEXT,expires REAL,created REAL,status TEXT,code TEXT);
   CREATE TABLE IF NOT EXISTS seasons(id INTEGER PRIMARY KEY,name TEXT,starts REAL,ends REAL,status TEXT,snapshot TEXT);
   CREATE TABLE IF NOT EXISTS season_scores(season_id INTEGER,uid TEXT,score INTEGER DEFAULT 0,PRIMARY KEY(season_id,uid));
@@ -155,6 +156,7 @@ def validate_settings(value):
   if not isinstance(cfg,dict) or type(cfg.get('enabled')) is not bool:raise ValueError('게임 설정을 확인하세요')
   integer(cfg.get('fee'),0,30);integer(cfg.get('minBet'),1);integer(cfg.get('maxBet'),1)
   if cfg['maxBet']<cfg['minBet']:raise ValueError('게임 베팅 한도를 확인하세요')
+  if s['casino'] and cfg['enabled'] and max(s['minBet'],cfg['minBet'])>min(s['maxBet'],cfg['maxBet']):raise ValueError(games.CATALOG[g][0]+'의 베팅 범위가 전체 베팅 범위와 겹치지 않습니다')
  s['social']=social.validate(s.get('social',{}))
  return s
 
@@ -255,7 +257,7 @@ def operate(actor,path,b,admin=False,context=None):
     reason=str(b.get('reason','관리자 조정'))[:200];result=adjust(c,uid,amount,reason);audit(c,actor,path,dict(uid=uid,amount=amount,reason=reason));job(c,'log',dict(text=f'관리자 {actor}: {uid} 띵조코인 {amount:+,} ({reason})'));return result
    if path=='attendance':
     ensure(c,uid,context.get('name') if uid==actor else None);day=today(s);row=c.execute('SELECT * FROM attendance WHERE uid=?',(uid,)).fetchone()
-    if row and row['last_day']==str(day):raise ValueError('오늘은 이미 출석했어요')
+    if row and row['last_day']>=str(day):raise ValueError('오늘은 이미 출석했어요. 서버 시간대를 변경했다면 마지막 출석일 다음 날부터 받을 수 있어요')
     streak=row['streak']+1 if row and row['last_day']==str(day-timedelta(days=1)) else 1;count=(row['total'] if row else 0)+1
     xp=boosted(s['attendanceXP']+s['streakBonus']*min(streak-1,s['streakCap']),s,'attendance',context.get('channel',''),context.get('roles',[]))
     c.execute('INSERT INTO attendance VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET last_day=excluded.last_day,streak=excluded.streak,total=excluded.total',(uid,str(day),streak,count));adjust(c,uid,xp,'일일 출석');job(c,'roles',dict(uid=uid));return dict(ok=True,xp=xp,streak=streak,total=count)
@@ -294,7 +296,7 @@ def operate(actor,path,b,admin=False,context=None):
    if path=='product':
     name=str(b.get('name','')).strip()[:100];kind=b.get('kind');price=integer(b.get('price'),1,100000000);stock=integer(b.get('stock',-1),-1,1000000);duration=integer(b.get('duration',0),0,31536000)
     if not name or kind not in ('role','code'):raise ValueError('상품 정보를 확인하세요')
-    role=str(b.get('role_id',''))
+    role=str(b.get('role_id','')) if kind=='role' else ''
     if kind=='role' and not role.isdigit():raise ValueError('역할 ID를 입력하세요')
     active=1 if b.get('active',True) else 0;pid=b.get('product_id')
     if pid:
@@ -305,11 +307,12 @@ def operate(actor,path,b,admin=False,context=None):
     pid=integer(b.get('product_id'),1);codes=b.get('codes')
     if not isinstance(codes,list) or not 1<=len(codes)<=1000 or any(not isinstance(x,str) or not 1<=len(x)<=1000 for x in codes):raise ValueError('코드는 1~1000개 입력하세요')
     if not c.execute("SELECT 1 FROM products WHERE id=? AND kind='code'",(pid,)).fetchone():raise ValueError('코드 상품이 아닙니다')
+    if len(set(codes))!=len(codes) or any(c.execute('SELECT 1 FROM inventory WHERE product_id=? AND code=?',(pid,code)).fetchone() for code in codes):raise ValueError('같은 상품에 이미 등록되었거나 중복된 코드가 있습니다')
     c.executemany('INSERT INTO inventory(product_id,code) VALUES(?,?)',[(pid,x) for x in codes]);audit(c,actor,path,dict(product_id=pid,count=len(codes)));return dict(ok=True)
    if path=='buy':
     ensure(c,uid,context.get('name') if uid==actor else None);p=c.execute('SELECT * FROM products WHERE id=? AND active=1',(integer(b.get('product_id'),1),)).fetchone()
     if not p or p['stock']==0:raise ValueError('판매 중인 재고가 없습니다')
-    item=c.execute('SELECT * FROM inventory WHERE product_id=? AND order_id IS NULL LIMIT 1',(p['id'],)).fetchone() if p['kind']=='code' else None
+    item=c.execute('SELECT i.* FROM inventory i WHERE i.product_id=? AND i.order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL) LIMIT 1',(p['id'],)).fetchone() if p['kind']=='code' else None
     if p['kind']=='code' and not item:raise ValueError('코드 재고가 없습니다')
     if p['kind']=='role' and c.execute("SELECT 1 FROM orders WHERE uid=? AND role_id=? AND status='active' AND (expires IS NULL OR expires>?)",(uid,p['role_id'],time.time())).fetchone():raise ValueError('이미 보유 중인 역할입니다')
     oid=secrets.token_hex(12);adjust(c,uid,-p['price'],'상점 구매: '+p['name']);now=time.time()
@@ -346,7 +349,7 @@ def state(uid=None,admin=False):
    'monthly':[dict(r) for r in c.execute("SELECT u.id,u.name,SUM(l.delta) score FROM ledger l JOIN users u ON l.uid=u.id WHERE l.created>=? GROUP BY u.id ORDER BY score DESC,u.id LIMIT 100",(datetime.combine(today(s).replace(day=1),datetime.min.time(),ZoneInfo(s['timezone'])).astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%d %H:%M:%S'),))],
    'attendance':[dict(r) for r in c.execute('SELECT u.id,u.name,a.total score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY a.total DESC,u.id LIMIT 100')],
    'streak':[dict(r) for r in c.execute('SELECT u.id,u.name,CASE WHEN a.last_day>=? THEN a.streak ELSE 0 END score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY score DESC,u.id LIMIT 100',((today(s)-timedelta(days=1)).isoformat(),))]}
-  products=[dict(r) for r in c.execute('SELECT p.*,(SELECT COUNT(*) FROM inventory i WHERE i.product_id=p.id AND i.order_id IS NULL) codes FROM products p'+('' if admin else ' WHERE active=1'))]
+  products=[dict(r) for r in c.execute('SELECT p.*,(SELECT COUNT(DISTINCT i.code) FROM inventory i WHERE i.product_id=p.id AND i.order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes FROM products p'+('' if admin else ' WHERE active=1'))]
   heartbeat=c.execute("SELECT value FROM meta WHERE key='heartbeat'").fetchone();connected=bool(heartbeat and time.time()-float(heartbeat[0])<120)
   visible=s if admin else {k:s[k] for k in ('minBet','maxBet','casino','games','giftFee','levelBase','gameTimeout','timezone','embedColor','social')}
   last_backup=c.execute("SELECT value FROM meta WHERE key='last_backup'").fetchone()

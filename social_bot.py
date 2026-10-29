@@ -148,7 +148,7 @@ async def live_updates():
 
 async def announce(guild,p):
  if not p.get('channel'):return
- ch=guild.get_channel(int(p['channel']))
+ ch=guild.get_channel_or_thread(int(p['channel']))
  if ch:
   s=await asyncio.to_thread(social.read,p['kind'],p['id']);await ch.send(embed=embed(s),view=view(s),allowed_mentions=discord.AllowedMentions.none())
 

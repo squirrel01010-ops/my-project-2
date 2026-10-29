@@ -33,3 +33,21 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
   for name,param in [('홀짝','선택'),('주사위','숫자'),('룰렛','선택'),('경마','말번호')]:
    command=bot.tree.get_command(name);command.to_dict(bot.tree)
    self.assertTrue(next(p for p in command.parameters if p.name==param).required)
+
+
+class RoleSync(unittest.IsolatedAsyncioTestCase):
+ async def test_uncached_member_is_fetched_and_receives_reward(self):
+  with tempfile.TemporaryDirectory() as d,patch.object(core,'DB',d+'/roles.db'):
+   core.init()
+   core.operate('admin','adjust',dict(id='123',amount=100,key='fund'),True)
+   core.operate('admin','settings',dict(roleRewards=[dict(type='level',threshold=1,role='777')],key='roles'),True)
+   member=SimpleNamespace(roles=[],nick=None,add_roles=AsyncMock(),remove_roles=AsyncMock())
+   guild=SimpleNamespace(get_member=lambda uid:None,fetch_member=AsyncMock(return_value=member),get_role=lambda rid:1,me=SimpleNamespace(top_role=2))
+   class RewardRole:
+    managed=False
+    def is_default(self):return False
+    def __ge__(self,other):return False
+   reward=RewardRole();guild.get_role=lambda rid:reward
+   await bot.sync_roles(guild,'123')
+   guild.fetch_member.assert_awaited_once_with(123)
+   member.add_roles.assert_awaited_once_with(reward,reason='STELLAR 보상 동기화')

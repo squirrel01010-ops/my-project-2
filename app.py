@@ -52,7 +52,7 @@ def membership(uid):
  with core.db() as c:s=core.settings(c)
  guild=discord_api('guilds/'+GUILD,BOT_TOKEN)
  roles=set(member.get('roles',[]));guild_roles=discord_api('guilds/'+GUILD+'/roles',BOT_TOKEN)
- admin=(str(guild.get('owner_id'))==uid or any(str(r['id']) in roles and int(r.get('permissions',0)) & 8 for r in guild_roles))
+ admin=(str(guild.get('owner_id'))==uid or bool(roles & set(s['adminRoles'])) or any(str(r['id']) in roles and int(r.get('permissions',0)) & 8 for r in guild_roles))
  return member,admin
 
 class Handler(BaseHTTPRequestHandler):

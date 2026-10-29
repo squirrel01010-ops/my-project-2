@@ -212,7 +212,6 @@ async def buy(i:discord.Interaction,상품번호:int):
  await i.response.defer(ephemeral=True);r=await operation(i,'buy',dict(product_id=상품번호));await i.followup.send('구매 완료!'+(('\n발급 코드: '+r['code']) if r.get('code') else '\n역할이 곧 적용됩니다.'),ephemeral=True)
 
 @tree.command(name='포인트관리',description='관리자 전용: 멤버 띵조코인 지급·차감·설정')
-@app_commands.default_permissions(administrator=True)
 @app_commands.choices(작업=[app_commands.Choice(name='지급',value='give'),app_commands.Choice(name='차감',value='take'),app_commands.Choice(name='잔액 설정',value='set')])
 async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,금액:app_commands.Range[int,0,100000000],사유:str='관리자 조정'):
  await i.response.defer(ephemeral=True)
@@ -220,7 +219,8 @@ async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,�
  member=await i.guild.fetch_member(i.user.id)
  roles=await i.guild.fetch_roles()
  owned={r.id for r in member.roles}
- if i.user.id!=i.guild.owner_id and not any(r.id in owned and r.permissions.administrator for r in roles):raise PermissionError('관리자 권한이 있는 역할이 필요합니다')
+ with core.db() as c:configured=set(core.settings(c)['adminRoles'])
+ if i.user.id!=i.guild.owner_id and not configured.intersection(map(str,owned)) and not any(r.id in owned and r.permissions.administrator for r in roles):raise PermissionError('설정된 관리자 역할 또는 Discord 관리자 권한이 필요합니다')
  if 대상.bot:raise ValueError('봇의 띵조코인은 변경할 수 없습니다')
  if 작업 not in ('give','take','set'):raise ValueError('잘못된 작업입니다')
  r=await asyncio.to_thread(core.operate,str(i.user.id),'adjust',dict(id=str(대상.id),name=대상.display_name,amount=-금액 if 작업=='take' else 금액,mode='set' if 작업=='set' else 'add',reason=사유,key=str(i.id)),True,context(i))
@@ -252,7 +252,9 @@ async def on_disconnect():
 
 async def sync_roles(guild,uid):
  member=guild.get_member(int(uid))
- if not member:return
+ if member is None:
+  try:member=await guild.fetch_member(int(uid))
+  except discord.NotFound:return
  want,managed,u,s=await asyncio.to_thread(core.desired_roles,uid)
  have={str(r.id) for r in member.roles};add=[guild.get_role(int(x)) for x in want-have];remove=[guild.get_role(int(x)) for x in (have&managed)-want]
  for role in add+remove:
@@ -274,7 +276,7 @@ async def sync_roles(guild,uid):
 
 async def send_channel(guild,channel,text,s):
  if not channel:return
- ch=guild.get_channel(int(channel))
+ ch=guild.get_channel_or_thread(int(channel))
  if not ch:raise ValueError('채널을 찾을 수 없습니다')
  await ch.send(embed=discord.Embed(description=text[:4000],color=int(s['embedColor'][1:],16)),allowed_mentions=discord.AllowedMentions.none())
 
@@ -311,7 +313,7 @@ async def update_ranking(guild):
  old=json.loads(r[0]) if r else {}
  if time.time()-old.get('time',0)<s['rankingInterval'] and old.get('channel')==s['rankingChannel']:return
  d=await asyncio.to_thread(core.state);text='\n'.join(f"{i+1}. {u['name']} · Lv.{u['level']} · {u['xp']:,} 띵조코인" for i,u in enumerate(d['users'][:20])) or '아직 활동 기록이 없어요'
- ch=guild.get_channel(int(s['rankingChannel']))
+ ch=guild.get_channel_or_thread(int(s['rankingChannel']))
  if not ch:raise ValueError('랭킹 채널을 찾을 수 없습니다')
  embed=discord.Embed(title='서버 띵조코인 리더보드',description=text,color=int(s['embedColor'][1:],16));msg=None
  if old.get('id') and old.get('channel')==s['rankingChannel']:
