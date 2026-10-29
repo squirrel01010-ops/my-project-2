@@ -136,8 +136,9 @@ async def profile(i:discord.Interaction):
 @tree.command(name='랭킹',description='서버 띵조코인 상위 10명을 확인해요')
 async def ranking(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
+ await i.response.defer()
  d=await asyncio.to_thread(core.state);text='\n'.join(f"{n+1}. {u['name']} — Lv.{u['level']} · {u['xp']:,} 띵조코인" for n,u in enumerate(d['users'][:10])) or '아직 기록이 없어요'
- await i.response.send_message(embed=discord.Embed(title='서버 리더보드',description=text,color=0x9d85ff),allowed_mentions=discord.AllowedMentions.none())
+ await i.followup.send(embed=discord.Embed(title='서버 리더보드',description=text,color=0x9d85ff),allowed_mentions=discord.AllowedMentions.none())
 
 @tree.command(name='선물',description='다른 멤버에게 띵조코인을 선물해요')
 async def gift(i:discord.Interaction,대상:discord.Member,금액:app_commands.Range[int,1,100000000]):
@@ -298,7 +299,9 @@ async def process_jobs(guild):
    elif j['kind']=='purchase':
     with core.db() as c:o=c.execute('SELECT * FROM orders WHERE id=?',(p['order'],)).fetchone()
     member=guild.get_member(int(p['uid']))
-    if member and o:await member.send(f"구매 완료: {o['name']}"+(f"\n코드: {o['code']}" if o['code'] else ''),allowed_mentions=discord.AllowedMentions.none())
+    if not o:raise ValueError('구매 내역을 찾을 수 없습니다')
+    if member is None:member=await guild.fetch_member(int(p['uid']))
+    await member.send(f"구매 완료: {o['name']}"+(f"\n코드: {o['code']}" if o['code'] else ''),allowed_mentions=discord.AllowedMentions.none())
    elif j['kind']=='season':await send_channel(guild,s['rankingChannel'],p['name']+' 종료\n'+'\n'.join(f"{i+1}. {u['name']} · {u['score']:,} 띵조코인" for i,u in enumerate(p['ranking'])),s)
    elif j['kind']=='log':await send_channel(guild,s['logChannel'],p['text'],s)
    elif j['kind']=='social_result':await social_bot.announce(guild,p)

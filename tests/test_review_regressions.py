@@ -80,3 +80,41 @@ class ThreadNotifications(unittest.IsolatedAsyncioTestCase):
   guild=SimpleNamespace(get_channel_or_thread=lambda channel:thread if channel==123 else None)
   await bot.send_channel(guild,'123','hello',{'embedColor':'#aabbcc'})
   thread.send.assert_awaited_once()
+
+class PurchaseDelivery(unittest.IsolatedAsyncioTestCase):
+ async def test_uncached_buyer_gets_code_and_failed_delivery_can_retry(self):
+  import discord
+  with tempfile.TemporaryDirectory() as d,patch.object(core,'DB',d+'/delivery.db'):
+   core.init()
+   core.operate('admin','adjust',dict(id='123',amount=100,key='fund'),True)
+   pid=core.operate('admin','product',dict(name='gift',kind='code',price=10,key='product'),True)['product_id']
+   core.operate('admin','inventory',dict(product_id=pid,codes=['PRIVATE-CODE'],key='stock'),True)
+   core.operate('123','buy',dict(product_id=pid,key='buy'))
+   with core.db(True) as c:
+    c.execute("UPDATE jobs SET status='done' WHERE kind!='purchase'")
+    jid=c.execute("SELECT id FROM jobs WHERE kind='purchase'").fetchone()[0]
+   member=SimpleNamespace(send=AsyncMock())
+   error=discord.Forbidden(SimpleNamespace(status=403,reason='Forbidden'),{'message':'Cannot send messages'})
+   guild=SimpleNamespace(get_member=lambda uid:None,fetch_member=AsyncMock(side_effect=error))
+   await bot.process_jobs(guild)
+   with core.db() as c:self.assertEqual(c.execute('SELECT status FROM jobs WHERE id=?',(jid,)).fetchone()[0],'failed')
+   core.operate('admin','job/retry',dict(job_id=jid,key='retry'),True)
+   guild.fetch_member=AsyncMock(return_value=member)
+   await bot.process_jobs(guild)
+   guild.fetch_member.assert_awaited_once_with(123)
+   self.assertIn('PRIVATE-CODE',member.send.await_args.args[0])
+   with core.db() as c:
+    self.assertEqual(c.execute('SELECT status FROM jobs WHERE id=?',(jid,)).fetchone()[0],'done')
+    self.assertEqual(core.user(c,'123')['xp'],90)
+   await bot.process_jobs(guild)
+   member.send.assert_awaited_once()
+
+ async def test_ranking_acknowledges_before_loading_state(self):
+  response=SimpleNamespace(defer=AsyncMock())
+  i=SimpleNamespace(guild_id=456,response=response,followup=SimpleNamespace(send=AsyncMock()))
+  def state():
+   response.defer.assert_awaited_once()
+   return {'users':[]}
+  with patch.object(bot,'GUILD_ID',456),patch.object(core,'state',side_effect=state):
+   await bot.tree.get_command('랭킹').callback(i)
+  i.followup.send.assert_awaited_once()
