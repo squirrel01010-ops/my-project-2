@@ -5,7 +5,7 @@ import secrets
 RNG = secrets.SystemRandom()
 CATALOG = {
  'coin': ('홀짝', '주사위 홀/짝을 맞히면 원금 포함 2배', False),
- 'dice': ('주사위', '숫자 맞추기 6배 · 홀짝 맞추기 2배 (원금 포함)', False),
+ 'dice': ('주사위', '1~6 중 선택한 숫자가 나오면 6배', False),
  'baskin': ('배스킨31', '1~3개씩 숫자를 세고 31을 말하면 패배. 봇은 무작위 선택. 승리 2배', True),
  'scratch': ('스크래치', '세 칸 일치 시 16배 · 모양 비중은 서버 설정 적용', False),
  'slots': ('슬롯', '두 개 일치 또는 모양별 세 개 일치 배율 적용 · 모양 비중은 서버 설정 적용', False),
@@ -58,12 +58,7 @@ def start(game, choice=None, config=None):
   roll=draw(6,1) if w else RNG.randint(1,6);s['roll']=roll
   finish(s,2 if (roll%2==1)==(choice=='odd') else 0,f'주사위: {roll}')
  elif game=='dice':
-  parity=choice in ('odd','even')
-  if not parity:number(choice,1,6)
-  roll=draw(6,1) if w else RNG.randint(1,6);s.update(roll=roll,mode='parity' if parity else 'number',choice=choice)
-  win=((roll%2==1)==(choice=='odd')) if parity else roll==choice
-  label=('홀수' if choice=='odd' else '짝수') if parity else str(choice)
-  finish(s,(2 if parity else 6) if win else 0,f'주사위: {roll} · 선택: {label} · '+('홀짝 맞추기' if parity else '숫자 맞추기'))
+  number(choice,1,6);roll=draw(6,1) if w else RNG.randint(1,6);s['roll']=roll;finish(s,6 if roll==choice else 0,f'주사위: {roll}')
  elif game=='slots':
   s['symbols']=[draw(5) for _ in range(3)]
   s['pairMultiplier']=config.get('pairMultiplier',0.5)

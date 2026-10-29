@@ -16,7 +16,7 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
      serial+=1
      i=SimpleNamespace(id=serial,guild_id=456,channel_id=789,user=SimpleNamespace(id=123,display_name='tester',roles=[]),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock())
      command=bot.tree.get_command(name.replace(' ',''))
-     args={'coin':['odd'],'dice':['number',3],'roulette':['red'],'horse':[2]}.get(game,[])
+     args={'coin':['odd'],'dice':[3],'roulette':['red'],'horse':[2]}.get(game,[])
      await command.callback(i,100,*args)
      while True:
       embed=i.edit_original_response.await_args.kwargs['embed'];view=i.edit_original_response.await_args.kwargs['view']
@@ -32,7 +32,7 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
      self.assertNotIn('수수료',[f.name for f in embed.fields],game)
      self.assertEqual(embed.fields[-1].name,'🪙 보유 코인')
  def test_commands_require_choices_and_validate_ranges(self):
-  for name,param in [('홀짝','선택'),('주사위','방식'),('룰렛','선택'),('경마','말번호')]:
+  for name,param in [('홀짝','선택'),('주사위','숫자'),('룰렛','선택'),('경마','말번호')]:
    command=bot.tree.get_command(name);command.to_dict(bot.tree)
    self.assertTrue(next(p for p in command.parameters if p.name==param).required)
 
