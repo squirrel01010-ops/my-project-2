@@ -46,4 +46,26 @@ class HTTP(unittest.TestCase):
   status,raw,_=self.request('/api/play',dict(id='555',game='mines',bet=10,key='mine555'),h)
   self.assertEqual(status,200);self.assertNotIn('hazards',json.loads(raw)['state'])
 
+# Discord links use the same cookie and per-request role checks as OAuth.
+ def test_discord_link_login_and_single_use(self):
+  token=core.issue_login_link('666','discord-member')
+  with patch.object(app,'membership',return_value=({'roles':[]},True)):
+   status,raw,h=self.request('/auth/discord-link',{'token':token})
+   self.assertEqual(status,200)
+   cookie=h['Set-Cookie'].split(';')[0];self.assertIn('HttpOnly',h['Set-Cookie'])
+   status,raw,_=self.request('/api/state',headers={'Cookie':cookie})
+   self.assertEqual(status,200);self.assertTrue(json.loads(raw)['identity']['admin'])
+   self.assertEqual(json.loads(raw)['identity']['id'],'666')
+   self.assertEqual(self.request('/auth/discord-link',{'token':token})[0],403)
+  with patch.object(app,'membership',return_value=({'roles':[]},False)):
+   status,raw,_=self.request('/api/state',headers={'Cookie':cookie})
+   self.assertEqual(status,200);self.assertFalse(json.loads(raw)['identity']['admin'])
+ def test_discord_link_expired_wrong_origin_and_nonmember(self):
+  token=core.issue_login_link('777','member')
+  self.assertEqual(self.request('/auth/discord-link',{'token':token},{'Origin':'https://evil.invalid'})[0],403)
+  with patch.object(app,'membership',side_effect=PermissionError('not a member')):
+   self.assertEqual(self.request('/auth/discord-link',{'token':token})[0],403)
+  with core.db(True) as c:c.execute('UPDATE login_links SET expires=0 WHERE uid=?',('777',))
+  self.assertEqual(self.request('/auth/discord-link',{'token':token})[0],403)
+
 if __name__=='__main__':unittest.main()

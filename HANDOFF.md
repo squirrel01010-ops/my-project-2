@@ -11,7 +11,7 @@ cp .env.example .env
 .venv/bin/python run.py
 ```
 
-관리자 키는 새로 생성해 .env의 ADMIN_TOKEN에 넣으세요. 봇 연결에는 DISCORD_TOKEN, DISCORD_GUILD_ID, DISCORD_CLIENT_ID가 필요합니다. 웹 Discord 로그인에는 DISCORD_CLIENT_SECRET과 Developer Portal의 OAuth 리디렉션 등록도 필요합니다. 로컬 개발 기본 URL은 http://127.0.0.1:8080입니다.
+관리자 키는 새로 생성해 .env의 ADMIN_TOKEN에 넣으세요. 봇 연결에는 DISCORD_TOKEN, DISCORD_GUILD_ID, DISCORD_CLIENT_ID가 필요합니다. Discord 안에서 `/관리`로 발급하는 일회용 링크는 Client Secret 없이 로그인할 수 있습니다. 별도의 웹 OAuth 로그인에는 DISCORD_CLIENT_SECRET과 Developer Portal의 OAuth 리디렉션 등록이 필요합니다. 로컬 개발 기본 URL은 http://127.0.0.1:8080입니다.
 
 ## 파일 구조
 
@@ -37,3 +37,5 @@ Bot-Hosting 무료 Python 서버에서 봇과 웹을 실행합니다. 자세한 
 공개 저장소는 다른 계정에서 Fork해 작업하고 PR을 만들 수 있습니다. 비공개 저장소는 소유자가 Settings → Collaborators에서 작업할 GitHub 계정을 초대해야 합니다. 다른 ChatGPT 계정에서는 그 GitHub 계정과 저장소를 연결하세요. 운영 호스팅 접근 권한과 비밀키는 GitHub 접근 권한과 별개입니다.
 
 토큰, 관리자 키, 실사용 데이터, 배포 식별 정보는 저장소에 포함하지 않습니다.
+
+`/관리` 로그인 링크는 발급자 계정에 연결되고 5분 이내 1회만 사용할 수 있습니다. URL fragment의 토큰을 POST로 교환한 뒤 주소에서 제거하며, 서버에는 토큰 해시만 저장합니다. 세션은 HttpOnly 쿠키로 보관하고 매 요청 시 멤버십과 관리자 권한을 다시 확인합니다.

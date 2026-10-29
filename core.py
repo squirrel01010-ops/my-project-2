@@ -59,6 +59,7 @@ def init():
   CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY,kind TEXT,payload TEXT,status TEXT DEFAULT 'pending',created REAL,error TEXT DEFAULT '');
   CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,uid TEXT,name TEXT,csrf TEXT,expires REAL);
   CREATE TABLE IF NOT EXISTS oauth_states(hash TEXT PRIMARY KEY,expires REAL);
+  CREATE TABLE IF NOT EXISTS login_links(hash TEXT PRIMARY KEY,uid TEXT,name TEXT,expires REAL);
   ''')
   social.init(c)
   c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)',(json.dumps(DEFAULTS),))
@@ -105,6 +106,29 @@ def adjust(c,uid,delta,reason,score=True):
  return after
 
 def today(s,stamp=None):return datetime.fromtimestamp(stamp or time.time(),ZoneInfo(s['timezone'])).date()
+def issue_login_link(uid,name):
+ token=secrets.token_urlsafe(32)
+ with db(True) as c:
+  c.execute('DELETE FROM login_links WHERE expires<? OR uid=?',(time.time(),str(uid)))
+  c.execute('INSERT INTO login_links VALUES(?,?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),str(uid),name,time.time()+300))
+ return token
+
+def login_link_user(token):
+ if not isinstance(token,str) or not 20<=len(token)<=100:raise PermissionError('로그인 링크가 올바르지 않습니다. Discord에서 /관리로 다시 열어주세요.')
+ with db() as c:r=c.execute('SELECT * FROM login_links WHERE hash=? AND expires>?',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
+ if not r:raise PermissionError('로그인 링크가 만료되었거나 이미 사용됐어요. Discord에서 /관리로 새 링크를 받아주세요.')
+ return dict(r)
+
+def redeem_login_link(token):
+ session=secrets.token_urlsafe(32);csrf=secrets.token_urlsafe(24)
+ with db(True) as c:
+  r=c.execute('SELECT * FROM login_links WHERE hash=? AND expires>?',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
+  if not r:raise PermissionError('이미 사용했거나 만료된 로그인 링크입니다. /관리로 다시 열어주세요.')
+  ensure(c,r['uid'],r['name'])
+  c.execute('DELETE FROM login_links WHERE hash=?',(r['hash'],))
+  c.execute('INSERT INTO sessions VALUES(?,?,?,?,?)',(hashlib.sha256(session.encode()).hexdigest(),r['uid'],r['name'],csrf,time.time()+86400))
+ return session
+
 def cooldown(c,key,seconds,now=None):
  now=time.time() if now is None else now;r=c.execute('SELECT stamp FROM cooldowns WHERE key=?',(key,)).fetchone()
  if r and now-r[0]<seconds:raise ValueError(f'{math.ceil(seconds-(now-r[0]))}초 후 다시 시도하세요')

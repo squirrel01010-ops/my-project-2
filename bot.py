@@ -214,7 +214,12 @@ async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,�
 
 @tree.command(name='관리',description='웹 관리 사이트를 열어요')
 async def dashboard(i:discord.Interaction):
- await i.response.send_message(os.getenv('PUBLIC_URL','http://127.0.0.1:8080'),ephemeral=True)
+ if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요.',ephemeral=True)
+ await i.response.defer(ephemeral=True)
+ token=await asyncio.to_thread(core.issue_login_link,str(i.user.id),i.user.display_name)
+ url=os.getenv('PUBLIC_URL','http://127.0.0.1:8080').rstrip('/')+'/#login='+token
+ v=discord.ui.View();v.add_item(discord.ui.Button(label='관리 사이트 열기 · 자동 로그인',url=url))
+ await i.followup.send('아래 버튼으로 접속하면 디스코드 계정으로 로그인돼요.\n본인 전용 링크 · 5분 이내 1회 사용 · 공유하지 마세요.',view=v,ephemeral=True)
 
 @tree.error
 async def command_error(i,error):

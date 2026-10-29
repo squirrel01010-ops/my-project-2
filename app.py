@@ -111,11 +111,16 @@ class Handler(BaseHTTPRequestHandler):
    # No cross-origin mutations, including local token mode.
    origin=self.headers.get('Origin')
    if origin and origin!=ORIGIN:raise PermissionError('허용되지 않은 출처입니다')
-   who=self.identity(csrf=True)
    n=int(self.headers.get('Content-Length',0))
    if not 0<n<=262144:raise ValueError('요청 크기를 확인하세요')
    body=json.loads(self.rfile.read(n))
    if not isinstance(body,dict):raise ValueError('JSON 객체를 입력하세요')
+   if self.path=='/auth/discord-link':
+    token=body.get('token');link=core.login_link_user(token)
+    membership(link['uid'])
+    session=core.redeem_login_link(token)
+    return self.send(200,dict(ok=True),headers={'Set-Cookie':self.cookie_header('orbit_session',session,86400)})
+   who=self.identity(csrf=True)
    if self.path=='/api/logout':
     with core.db(True) as c:c.execute('DELETE FROM sessions WHERE hash=?',(digest(self.cookie('orbit_session')),))
     return self.send(200,dict(ok=True),headers={'Set-Cookie':self.cookie_header('orbit_session','',0)})
