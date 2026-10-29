@@ -77,7 +77,7 @@ def game_embed(r):
  if s.get('message'):e.description+='\n'+s['message']
  if done:
   raw=int(r['bet']*s.get('mult',0));fee=max(0,raw-r.get('payout',0))
-  e.add_field(name='수익',value=f"**{max(0,r['payout']-r['bet']):,}** 띵조코인",inline=True)
+  e.add_field(name='손실' if r['payout']<r['bet'] else '수익',value=f"**{abs(r['payout']-r['bet']):,}** 띵조코인",inline=True)
   e.add_field(name='수수료',value=f"**{fee:,}** 띵조코인",inline=True)
  else:e.add_field(name='베팅',value=f"{r['bet']:,} 띵조코인",inline=True)
  if r.get('uid'):
