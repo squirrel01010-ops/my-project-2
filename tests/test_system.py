@@ -116,7 +116,7 @@ class Economy(unittest.TestCase):
      r=self.op('game/action',dict(round=r['id'],revision=r['revision'],action=act,value=value))
     self.assertGreaterEqual(r['payout'],0)
  def test_invalid_settings_rollback(self):
-  with self.assertRaises(ValueError):self.op('settings',dict(minBet=100,maxBet=1),admin=True)
+  with self.assertRaises(ValueError):self.op('settings',dict(minBet=0,maxBet=1),admin=True)
   with core.db() as c:self.assertEqual(core.settings(c)['minBet'],10)
 
 class Rules(unittest.TestCase):

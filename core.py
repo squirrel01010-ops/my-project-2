@@ -80,6 +80,11 @@ def settings(c):
  return out
 
 def integer(v,lo=0,hi=1000000):return games.number(v,lo,hi)
+
+def wager(v,minimum,balance):
+ if type(v) is not int or v<minimum:raise ValueError(f'{minimum:,} 이상 정수를 입력하세요')
+ if v>balance:raise ValueError('베팅할 띵조코인이 부족해요')
+ return v
 def ident(v):
  v=str(v).strip()
  if not v or len(v)>100:raise ValueError('유저 ID를 확인하세요')
@@ -121,7 +126,7 @@ def validate_settings(value):
  s={**DEFAULTS,**value}
  for key in ('chatXP','cooldown','voiceXP','attendanceXP','streakBonus','streakCap','minBet','maxBet','gameCooldown','gameTimeout','levelBase','voiceMinMembers','dailyCap','rankingInterval','giftFee'):
   integer(s[key],0,1000000)
- if not 1<=s['minBet']<=s['maxBet'] or s['levelBase']<1 or s['voiceMinMembers']<1 or s['gameTimeout']<60 or s['rankingInterval']<60 or s['giftFee']>30:raise ValueError('설정 범위를 확인하세요')
+ if not 1<=s['minBet'] or s['levelBase']<1 or s['voiceMinMembers']<1 or s['gameTimeout']<60 or s['rankingInterval']<60 or s['giftFee']>30:raise ValueError('설정 범위를 확인하세요')
  for k in ('casino','voiceAllowMuted','voiceAllowDeafened','seasonResetXP'):
   if type(s[k]) is not bool:raise ValueError('켜기/끄기 값을 확인하세요')
  try:ZoneInfo(s['timezone'])
@@ -155,8 +160,6 @@ def validate_settings(value):
   cfg=s['games'].get(g)
   if not isinstance(cfg,dict) or type(cfg.get('enabled')) is not bool:raise ValueError('게임 설정을 확인하세요')
   integer(cfg.get('fee'),0,30);integer(cfg.get('minBet'),1);integer(cfg.get('maxBet'),1)
-  if cfg['maxBet']<cfg['minBet']:raise ValueError('게임 베팅 한도를 확인하세요')
-  if s['casino'] and cfg['enabled'] and max(s['minBet'],cfg['minBet'])>min(s['maxBet'],cfg['maxBet']):raise ValueError(games.CATALOG[g][0]+'의 베팅 범위가 전체 베팅 범위와 겹치지 않습니다')
  s['social']=social.validate(s.get('social',{}))
  return s
 
@@ -273,7 +276,7 @@ def operate(actor,path,b,admin=False,context=None):
      if s['casinoRoles'] and not set(context.get('roles',[]))&set(s['casinoRoles']):raise PermissionError('게임 허용 역할이 필요합니다')
      # Browser play is disabled if a channel-only casino policy is configured.
      if s['casinoChannels'] and context.get('channel') not in s['casinoChannels']:raise PermissionError('지정된 디스코드 채널에서 플레이하세요')
-    bet=integer(b.get('bet'),max(s['minBet'],cfg['minBet']),min(s['maxBet'],cfg['maxBet']))
+    bet=wager(b.get('bet'),max(s['minBet'],cfg['minBet']),user(c,uid)['xp'])
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
     if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')

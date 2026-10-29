@@ -30,8 +30,7 @@ def validate(s):
  for k in ('holdemEnabled','lotteryEnabled','crashEnabled'):
   if type(out[k]) is not bool:raise ValueError('게임 활성화 설정을 확인하세요')
  for k in ('holdemMinBuyin','holdemMaxBuyin','lotteryPrice','crashMinBet','crashMaxBet'):integer(out[k],1,1000000)
- for low,high in [('holdemMinBuyin','holdemMaxBuyin'),('crashMinBet','crashMaxBet')]:
-  if out[low]>out[high]:raise ValueError('게임 금액 범위를 확인하세요')
+
  integer(out['holdemLobby'],15,600);integer(out['holdemTurn'],15,180);integer(out['lotteryHour'],0,23);integer(out['lotteryMaxTickets'],1,100);integer(out['lotteryFee'],0,30);integer(out['crashLobby'],10,120)
  return out
 
@@ -140,7 +139,7 @@ def lobby_allowed(s,kind,ctx,admin):
   if s['casinoRoles'] and not set(ctx.get('roles',[]))&set(s['casinoRoles']):raise PermissionError('게임 참여 역할이 필요합니다')
 
 def operate(c,actor,path,b,admin,ctx):
- from core import settings,ensure,adjust,integer,user
+ from core import settings,ensure,adjust,integer,user,wager
  now=time.time();cfgs=settings(c);cfg=config(cfgs);kind,action=path.split('/',1)
  # No admin impersonation: even administrators cannot play another person's hand.
  ensure(c,actor,ctx.get('name'));s=None
@@ -151,7 +150,7 @@ def operate(c,actor,path,b,admin,ctx):
     other=json.loads(row[0])
     if any(p['uid']==actor for p in other['players']):raise ValueError('이미 참여 중인 홀덤 테이블이 있습니다')
   if action=='create':
-   vacant();buyin=integer(b.get('buyin'),cfg['holdemMinBuyin'],cfg['holdemMaxBuyin']);blind=integer(b.get('blind'),2,max(2,buyin//10))
+   vacant();buyin=wager(b.get('buyin'),cfg['holdemMinBuyin'],user(c,actor)['xp']);blind=integer(b.get('blind'),2,max(2,buyin//10))
    if blind*10>buyin:raise ValueError('바이인은 빅블라인드의 10배 이상이어야 합니다')
    s=dict(id=secrets.token_hex(12),kind='holdem',host=actor,channel=ctx.get('channel',''),status='lobby',created=now,lobby_end=now+cfg['holdemLobby'],buyin=buyin,blind=blind,turn_seconds=cfg['holdemTurn'],revision=0,players=[])
   else:
@@ -209,7 +208,7 @@ def operate(c,actor,path,b,admin,ctx):
    if s['status']!='lobby':raise ValueError('이미 출발했습니다. 다음 판에 참여하세요')
    if any(p['uid']==actor for p in s['players']):raise ValueError('이미 이 판에 베팅했습니다')
    if len(s['players'])>=100:raise ValueError('참가자가 가득 찼습니다')
-   bet=integer(b.get('bet'),s['min_bet'],s['max_bet']);auto=integer(b.get('auto',0),0,9999)
+   bet=wager(b.get('bet'),s['min_bet'],user(c,actor)['xp']);auto=integer(b.get('auto',0),0,9999)
    if auto and auto<101:raise ValueError('자동 정산은 1.01~99.99배입니다')
    adjust(c,actor,-bet,'크래시 베팅');s['players'].append(dict(uid=actor,name=user(c,actor)['name'],bet=bet,auto=auto,status='bet',payout=0))
   elif action=='cashout':

@@ -13,9 +13,9 @@ class EconomyRegressions(unittest.TestCase):
  def op(self,path,**body):
   self.serial+=1
   return core.operate('admin',path,dict(body,key=str(self.serial)),True)
- def test_disjoint_bet_limits_rejected_without_changing_settings(self):
-  with self.assertRaisesRegex(ValueError,'겹치지'):self.op('settings',minBet=20000,maxBet=30000)
-  with core.db() as c:self.assertEqual(core.settings(c)['minBet'],10)
+ def test_minimum_no_longer_blocked_by_obsolete_cap(self):
+  self.op('settings',minBet=20000,maxBet=30000)
+  with core.db() as c:self.assertEqual(core.settings(c)['minBet'],20000)
  def test_timezone_backwards_does_not_pay_another_attendance(self):
   with patch.object(core,'today',return_value=date(2026,10,30)):self.op('attendance')
   with patch.object(core,'today',return_value=date(2026,10,29)):

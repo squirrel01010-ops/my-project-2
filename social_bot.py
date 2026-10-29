@@ -156,7 +156,7 @@ def register(client,tree,guild_id):
  global CLIENT,GUILD_ID
  CLIENT=client;GUILD_ID=guild_id
  @tree.command(name='홀덤',description='2~6명이 참여하는 텍사스 홀덤 테이블을 만들어요')
- async def holdem(i:discord.Interaction,바이인:app_commands.Range[int,20,1000000]=1000,빅블라인드:app_commands.Range[int,2,100000]=20):
+ async def holdem(i:discord.Interaction,바이인:app_commands.Range[int,20]=1000,빅블라인드:app_commands.Range[int,2]=20):
   await i.response.defer();s=await op(i,'holdem/create',dict(buyin=바이인,blind=빅블라인드));await publish(i,s)
  @tree.command(name='홀덤보기',description='테이블을 다시 표시하고 내 카드를 확인해요')
  async def holdem_show(i:discord.Interaction,테이블:str=''):
@@ -175,7 +175,7 @@ def register(client,tree,guild_id):
   if not s:return await i.followup.send('복권 판매가 비활성화되어 있어요.',ephemeral=True)
   await publish(i,s)
  @tree.command(name='크래시',description='크래시에 베팅해요. 자동정산 0은 수동 정산입니다')
- async def crash(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000],자동정산:app_commands.Range[float,0.0,99.99]=2.0):
+ async def crash(i:discord.Interaction,베팅:app_commands.Range[int,1],자동정산:app_commands.Range[float,0.0,99.99]=2.0):
   await i.response.defer();s=await op(i,'crash/join',dict(bet=베팅,auto=round(자동정산*100)));await publish(i,s)
  @tree.command(name='크래시보기',description='현재 채널의 크래시 화면을 다시 표시해요')
  async def crash_show(i:discord.Interaction):

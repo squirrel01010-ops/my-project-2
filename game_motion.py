@@ -23,7 +23,6 @@ async def reveal(edit,r,final_embed,final_view):
  try:
   for frame in frames(r['game']):
    e=discord.Embed(title=games.CATALOG[r['game']][0],description=frame,color=0x9d85ff)
-   e.set_footer(text='결과 공개 연출 · 표시되는 중간 그림은 실제 결과가 아닙니다')
    await edit(embed=e,view=discord.ui.View(timeout=None))
    await asyncio.sleep(DURATION[r['game']]/len(frames(r['game'])))
  except discord.HTTPException:

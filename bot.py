@@ -161,7 +161,7 @@ async def game_help(i:discord.Interaction):
  e.add_field(name='🎲 바로 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if not v[2]),inline=True)
  e.add_field(name='🃏 선택하며 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if v[2]),inline=True)
  e.add_field(name='🤝 함께 즐기기',value='/홀덤 · /복권 · /크래시',inline=False)
- e.add_field(name='💎 이용 안내',value=f"전체 베팅 범위 **{s['minBet']:,} ~ {s['maxBet']:,} 띵조코인**\n게임별 한도와 허용 역할·채널도 적용됩니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
+ e.add_field(name='💎 이용 안내',value=f"최소 베팅 **{s['minBet']:,} 띵조코인** · 최대 한도 없음\n보유 코인 안에서 베팅할 수 있습니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
  e.set_footer(text='✦ STELLAR · 서버 가상 띵조코인으로 즐기는 게임')
  await i.followup.send(embed=e,ephemeral=True)
 
@@ -171,25 +171,25 @@ async def casino_help(i:discord.Interaction):
 
 @tree.command(name='홀짝',description='주사위가 홀수일지 짝수일지 맞혀요')
 @app_commands.choices(선택=[app_commands.Choice(name='홀',value='odd'),app_commands.Choice(name='짝',value='even')])
-async def coin_command(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000],선택:str):
+async def coin_command(i:discord.Interaction,베팅:app_commands.Range[int,1],선택:str):
  await start_game(i,'coin',베팅,선택)
 
 @tree.command(name='주사위',description='1~6 중 나올 숫자를 맞혀요')
-async def dice_command(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000],숫자:app_commands.Range[int,1,6]):
+async def dice_command(i:discord.Interaction,베팅:app_commands.Range[int,1],숫자:app_commands.Range[int,1,6]):
  await start_game(i,'dice',베팅,숫자)
 
 @tree.command(name='룰렛',description='빨강·검정·제로 중 선택해 룰렛을 돌려요')
 @app_commands.choices(선택=[app_commands.Choice(name='빨강',value='red'),app_commands.Choice(name='검정',value='black'),app_commands.Choice(name='제로 (0)',value='zero')])
-async def roulette_command(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000],선택:str):
+async def roulette_command(i:discord.Interaction,베팅:app_commands.Range[int,1],선택:str):
  await start_game(i,'roulette',베팅,선택)
 
 @tree.command(name='경마',description='1~5번 말 중 우승할 말을 골라요')
-async def horse_command(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000],말번호:app_commands.Range[int,1,5]):
+async def horse_command(i:discord.Interaction,베팅:app_commands.Range[int,1],말번호:app_commands.Range[int,1,5]):
  await start_game(i,'horse',베팅,말번호)
 
 SIMPLE_GAMES={k:v[0].replace(' ','') for k,v in games.CATALOG.items() if k not in ('coin','dice','roulette','horse')}
 def register_game_command(game,name):
- async def command(i:discord.Interaction,베팅:app_commands.Range[int,1,1000000]):
+ async def command(i:discord.Interaction,베팅:app_commands.Range[int,1]):
   await start_game(i,game,베팅)
  tree.command(name=name,description=games.CATALOG[game][0]+' 게임을 시작해요')(command)
 for game,name in SIMPLE_GAMES.items():register_game_command(game,name)
