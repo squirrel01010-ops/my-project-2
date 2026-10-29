@@ -20,6 +20,9 @@ CATALOG = {
  'tower': ('타워', '층마다 3칸 중 안전한 칸 2개. 최대 6층, 정산 가능', True),
  'horse': ('경마', '동일한 확률의 말 5마리. 선택한 말이 우승하면 5배', False),
 }
+MULTIPLIER_ICONS={0:'💨',1:'🪙',2:'💎',4:'👑',36:'🌟'}
+def multiplier_badge(mult):return f"{MULTIPLIER_ICONS.get(mult,'✨')} {mult:g}배"
+
 RED = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 
 def number(value, lo, hi):
@@ -49,10 +52,10 @@ def start(game, choice=None):
   n=5 if game=='slots' else 4;s['symbols']=[RNG.randrange(n) for _ in range(3)]
   finish(s,n*n if len(set(s['symbols']))==1 else 0,'세 칸 일치!' if len(set(s['symbols']))==1 else '다음 기회에')
  elif game=='wheel':
-  s['segment']=RNG.randrange(8);m=[0,0,0,0,1,1,2,4][s['segment']];finish(s,m,f'{m}배 칸에 멈췄어요')
+  s['segment']=RNG.randrange(8);m=[0,0,0,0,1,1,2,4][s['segment']];finish(s,m,f'{multiplier_badge(m)} 칸에 멈췄어요')
  elif game=='roulette':
   if choice not in ('red','black','zero'):raise ValueError('red, black, zero 중 선택하세요')
-  r=RNG.randrange(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black';finish(s,(36 if r==0 else 2) if choice==color else 0,f'{r} · {color}')
+  r=RNG.randrange(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black';finish(s,(36 if r==0 else 2) if choice==color else 0,f"{r} · {color} · {multiplier_badge((36 if r==0 else 2) if choice==color else 0)}")
  elif game=='horse':
   number(choice,1,5);s['order']=RNG.sample(list(range(1,6)),5);finish(s,5 if s['order'][0]==choice else 0,f"{s['order'][0]}번 말 우승")
  elif game=='blackjack':
@@ -128,3 +131,4 @@ def public_view(s):
   if s['game']=='indian':out['player']=None
  elif 'hazards' in s:out['hazards']=s['hazards']
  return out
+

@@ -20,12 +20,12 @@ def database_path():
  return str(path if path.is_absolute() else ROOT/path)
 
 DB=database_path()
-DEFAULTS=dict(chatXP=25,cooldown=60,voiceXP=12,attendanceXP=50,streakBonus=10,streakCap=7,
+DEFAULTS=dict(chatXP=25,cooldown=0,voiceXP=12,attendanceXP=50,streakBonus=10,streakCap=7,
  minBet=10,maxBet=10000,casino=True,gameCooldown=5,gameTimeout=900,levelBase=100,
  timezone='Asia/Seoul',excludedChannels=[],excludedRoles=[],casinoChannels=[],casinoRoles=[],adminRoles=[],
  voiceMinMembers=2,voiceAllowMuted=True,voiceAllowDeafened=False,dailyCap=5000,
  roleRewards=[],roleMode='highest',nicknameFormat='',levelChannel='',logChannel='',rankingChannel='',rankingInterval=3600,
- levelMessage='{user}님이 레벨 {level}에 도달했어요!',attendanceMessage='{user}님 출석 완료! +{xp} EXP · {streak}일 연속',
+ levelMessage='{user}님이 레벨 {level}에 도달했어요!',attendanceMessage='{user}님 출석 완료! +{xp} 띵조코인 · {streak}일 연속',
  embedColor='#9d85ff',boosts=[],seasonMode='off',seasonResetXP=False,seasonRewards=[],giftFee=0,
  social=social.DEFAULTS,
  games={k:dict(enabled=True,fee=0,minBet=10,maxBet=10000) for k in games.CATALOG})
@@ -53,6 +53,7 @@ def init():
   CREATE TABLE IF NOT EXISTS activity(uid TEXT,day TEXT,channel TEXT,kind TEXT,amount INTEGER DEFAULT 0,xp INTEGER DEFAULT 0,PRIMARY KEY(uid,day,channel,kind));
   CREATE TABLE IF NOT EXISTS attendance(uid TEXT PRIMARY KEY,last_day TEXT,streak INTEGER,total INTEGER);
   CREATE TABLE IF NOT EXISTS cooldowns(key TEXT PRIMARY KEY,stamp REAL);
+  CREATE TABLE IF NOT EXISTS chat_messages(id TEXT PRIMARY KEY,created REAL);
   CREATE TABLE IF NOT EXISTS game_rounds(id TEXT PRIMARY KEY,uid TEXT,game TEXT,bet INTEGER,state TEXT,fee INTEGER,revision INTEGER DEFAULT 0,created REAL,expires REAL,status TEXT,payout INTEGER DEFAULT 0);
   CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY,name TEXT,price INTEGER,kind TEXT,role_id TEXT,duration INTEGER,stock INTEGER,active INTEGER DEFAULT 1);
   CREATE TABLE IF NOT EXISTS inventory(id INTEGER PRIMARY KEY,product_id INTEGER,code TEXT,order_id TEXT);
@@ -74,6 +75,7 @@ def settings(c):
  value=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]);out={**DEFAULTS,**value}
  out['games']={k:{**DEFAULTS['games'][k],**value.get('games',{}).get(k,{})} for k in games.CATALOG}
  out['social']=social.config(out)
+ for key in ('attendanceMessage','levelMessage'):out[key]=out[key].replace('EXP','띵조코인').replace('경험치','띵조코인')
  return out
 
 def integer(v,lo=0,hi=1000000):return games.number(v,lo,hi)
@@ -97,7 +99,7 @@ def audit(c,actor,action,detail):c.execute('INSERT INTO audit(actor,action,detai
 def job(c,kind,payload):c.execute('INSERT INTO jobs(kind,payload,created) VALUES(?,?,?)',(kind,json.dumps(payload),time.time()))
 def adjust(c,uid,delta,reason,score=True):
  integer(delta,-10**12,10**12);before=user(c,uid);s=settings(c)
- if not c.execute('UPDATE users SET xp=xp+? WHERE id=? AND xp+? BETWEEN 0 AND 1000000000000000',(delta,uid,delta)).rowcount:raise ValueError('경험치가 부족하거나 잔액 한도를 초과합니다')
+ if not c.execute('UPDATE users SET xp=xp+? WHERE id=? AND xp+? BETWEEN 0 AND 1000000000000000',(delta,uid,delta)).rowcount:raise ValueError('띵조코인이 부족하거나 잔액 한도를 초과합니다')
  c.execute('INSERT INTO ledger(uid,delta,reason) VALUES(?,?,?)',(uid,delta,reason[:200]))
  if score:
   season=c.execute("SELECT id FROM seasons WHERE status='active'").fetchone()
@@ -156,17 +158,21 @@ def validate_settings(value):
  s['social']=social.validate(s.get('social',{}))
  return s
 
-def activity(uid,name,kind,channel,roles=(),category='',stamp=None):
+def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=None):
  now=stamp if stamp is not None else time.time()
  with db(True) as c:
   s=settings(c);uid=ensure(c,uid,name)
   if kind not in ('chat','voice'):raise ValueError('활동 종류 오류')
-  if str(channel) in s['excludedChannels'] or str(category) in s['excludedChannels'] or set(roles)&set(s['excludedRoles']):return 0
-  try:cooldown(c,kind+':'+uid,s['cooldown'] if kind=='chat' else 55,now)
-  except ValueError:return 0
+  if kind=='chat':
+   if message_id is not None and not c.execute('INSERT OR IGNORE INTO chat_messages VALUES(?,?)',(str(message_id),now)).rowcount:return 0
+  else:
+   if str(channel) in s['excludedChannels'] or str(category) in s['excludedChannels'] or set(roles)&set(s['excludedRoles']):return 0
+   try:cooldown(c,'voice:'+uid,55,now)
+   except ValueError:return 0
   day=str(today(s,now));base=s['chatXP'] if kind=='chat' else s['voiceXP'];xp=boosted(base,s,kind,str(channel),roles,now)
-  used=c.execute('SELECT COALESCE(SUM(xp),0) FROM activity WHERE uid=? AND day=?',(uid,day)).fetchone()[0]
-  if s['dailyCap']:xp=min(xp,max(0,s['dailyCap']-used))
+  if kind=='voice' and s['dailyCap']:
+   used=c.execute("SELECT COALESCE(SUM(xp),0) FROM activity WHERE uid=? AND day=? AND kind='voice'",(uid,day)).fetchone()[0]
+   xp=min(xp,max(0,s['dailyCap']-used))
   c.execute('INSERT INTO activity VALUES(?,?,?,?,1,?) ON CONFLICT(uid,day,channel,kind) DO UPDATE SET amount=amount+1,xp=xp+excluded.xp',(uid,day,str(channel),kind,xp))
   if xp:adjust(c,uid,xp,('채팅' if kind=='chat' else '음성')+' 활동')
   return xp
@@ -243,10 +249,10 @@ def operate(actor,path,b,admin=False,context=None):
    if path=='adjust':
     ensure(c,uid,b.get('name'));amount=integer(b.get('amount'),-100000000,100000000)
     if b.get('mode','add')=='set':
-     if amount<0:raise ValueError('설정할 포인트는 0 이상이어야 합니다')
+     if amount<0:raise ValueError('설정할 띵조코인은 0 이상이어야 합니다')
      amount-=user(c,uid)['xp']
     elif b.get('mode','add')!='add':raise ValueError('잘못된 조정 방식입니다')
-    reason=str(b.get('reason','관리자 조정'))[:200];result=adjust(c,uid,amount,reason);audit(c,actor,path,dict(uid=uid,amount=amount,reason=reason));job(c,'log',dict(text=f'관리자 {actor}: {uid} 경험치 {amount:+,} ({reason})'));return result
+    reason=str(b.get('reason','관리자 조정'))[:200];result=adjust(c,uid,amount,reason);audit(c,actor,path,dict(uid=uid,amount=amount,reason=reason));job(c,'log',dict(text=f'관리자 {actor}: {uid} 띵조코인 {amount:+,} ({reason})'));return result
    if path=='attendance':
     ensure(c,uid,context.get('name') if uid==actor else None);day=today(s);row=c.execute('SELECT * FROM attendance WHERE uid=?',(uid,)).fetchone()
     if row and row['last_day']==str(day):raise ValueError('오늘은 이미 출석했어요')
@@ -268,7 +274,7 @@ def operate(actor,path,b,admin=False,context=None):
     bet=integer(b.get('bet'),max(s['minBet'],cfg['minBet']),min(s['maxBet'],cfg['maxBet']))
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
-    if user(c,uid)['xp']<bet:raise ValueError('베팅할 경험치가 부족해요. /출석 또는 채팅 활동으로 경험치를 모은 뒤 /내정보에서 잔액을 확인하세요')
+    if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')
     cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'));adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))

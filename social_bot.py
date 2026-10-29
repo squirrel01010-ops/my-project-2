@@ -22,27 +22,27 @@ STREET={'preflop':'첫 베팅','flop':'플롭','turn':'턴','river':'리버'}
 def embed(s):
  kind=s['kind'];e=discord.Embed(title=social.CATALOG[kind]['name'],color=0xa28aff)
  if kind=='holdem':
-  e.description=f"바이인 **{s['buyin']:,} EXP** · SB/BB **{max(1,s['blind']//2)}/{s['blind']}**\n상태: **{STATUS.get(s['status'],'준비 중')}**"
+  e.description=f"바이인 **{s['buyin']:,} 띵조코인** · SB/BB **{max(1,s['blind']//2)}/{s['blind']}**\n상태: **{STATUS.get(s['status'],'준비 중')}**"
   if s['status']=='lobby':e.description+=f"\n모집 마감 <t:{int(s['lobby_end'])}:R> · 2명 이상이면 자동 시작"
   else:
    e.add_field(name='공용 카드',value=' '.join(s.get('board',[])) or '🂠 🂠 🂠 🂠 🂠',inline=False)
-   e.add_field(name='팟',value=f"{sum(p.get('total',0) for p in s['players']):,} EXP · {STREET.get(s.get('street'),'')}")
+   e.add_field(name='팟',value=f"{sum(p.get('total',0) for p in s['players']):,} 띵조코인 · {STREET.get(s.get('street'),'')}")
    if s['status']=='active':e.add_field(name='현재 차례',value=f"{s['players'][s['turn']]['name']} · <t:{int(s['deadline'])}:R>")
   for p in s['players']:
    cards=' '.join(p.get('cards',[]));line=f"남은 칩 {p['stack']:,} · 이번 라운드 {p.get('round',0):,}"+(' · 폴드' if p.get('folded') else '')
-   if s['status']=='done':line+=f"\n반환 {s['payouts'].get(p['uid'],0):,} EXP · {s.get('hands',{}).get(p['uid'],'')}"
+   if s['status']=='done':line+=f"\n반환 {s['payouts'].get(p['uid'],0):,} 띵조코인 · {s.get('hands',{}).get(p['uid'],'')}"
    e.add_field(name=p['name'][:100],value=f'{cards}\n{line}',inline=False)
   e.set_footer(text='내 패는 [내 카드]에서만 비공개 확인 · 턴 초과 시 가능하면 체크, 아니면 폴드')
  elif kind=='lottery':
-  e.description=f"🎟 1장 **{s['price']:,} EXP** · 1인 최대 {s['max_tickets']}장\n추첨 <t:{int(s['draw_at'])}:F>\n상금 적립 {s['pot']+s['rollover']:,} EXP (이번 판매분 수수료 {s['fee']}%)"
-  if s['status']=='done':e.add_field(name='당첨 번호',value=' · '.join(map(str,s['winning'])));e.add_field(name='결과',value=f"당첨권 {len(s['winners'])}장 · 지급 {s['paid']:,} EXP")
+  e.description=f"🎟 1장 **{s['price']:,} 띵조코인** · 1인 최대 {s['max_tickets']}장\n추첨 <t:{int(s['draw_at'])}:F>\n상금 적립 {s['pot']+s['rollover']:,} 띵조코인 (이번 판매분 수수료 {s['fee']}%)"
+  if s['status']=='done':e.add_field(name='당첨 번호',value=' · '.join(map(str,s['winning'])));e.add_field(name='결과',value=f"당첨권 {len(s['winners'])}장 · 지급 {s['paid']:,} 띵조코인")
   e.set_footer(text='1~20 중 서로 다른 3개 · 모두 일치하면 당첨 · 당첨자가 없으면 이월')
  else:
   e.description=(f"🚀 출발 <t:{int(s['starts'])}:R>" if s['status']=='lobby' else f"{'💥 종료' if s['status']=='done' else '🚀 비행 중'} **{(s.get('crash',s['multiplier']) if s['status']=='done' else s['multiplier']):.2f}배**")
   lines=[]
   for p in s['players'][:25]:
    status=f"✅ {p.get('at',0):.2f}배 · 반환 {p['payout']:,}" if p['status']=='cashed' else '💥 패배' if p['status']=='lost' else f"자동 {p['auto']/100:.2f}배" if p['auto'] else '수동 정산'
-   lines.append(f"{p['name'][:30]} · {p['bet']:,} EXP · {status}")
+   lines.append(f"{p['name'][:30]} · {p['bet']:,} 띵조코인 · {status}")
   e.add_field(name=f"참가자 {len(s['players'])}명",value='\n'.join(lines)[:1024] or '모집 중',inline=False)
   e.set_footer(text='자동 정산 배당을 정해 두면 목표 배당에서 자동으로 정산돼요.')
  return e
@@ -83,7 +83,7 @@ async def update_message(i,s):
 class InputModal(discord.ui.Modal):
  def __init__(self,kind,rid,action,revision):
   super().__init__(title={'holdem':'레이즈 총액','lottery':'복권 번호 선택','crash':'크래시 참가'}[kind]);self.kind=kind;self.rid=rid;self.action=action;self.revision=revision
-  self.amount=discord.ui.TextInput(label='이번 라운드 총 베팅액' if kind=='holdem' else '번호 3개 (예: 1 7 20)' if kind=='lottery' else '베팅 경험치',max_length=50);self.add_item(self.amount)
+  self.amount=discord.ui.TextInput(label='이번 라운드 총 베팅액' if kind=='holdem' else '번호 3개 (예: 1 7 20)' if kind=='lottery' else '베팅 띵조코인',max_length=50);self.add_item(self.amount)
   if kind=='crash':self.auto=discord.ui.TextInput(label='자동 정산 배당 (0=수동, 예: 2.00)',default='2.00',max_length=10);self.add_item(self.auto)
  async def on_submit(self,i):
   await i.response.defer(ephemeral=True)
@@ -184,3 +184,4 @@ def register(client,tree,guild_id):
   with core.db() as c:r=c.execute("SELECT id FROM live_games WHERE kind='crash' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone()
   if not r:return await i.followup.send('이 채널에는 크래시 기록이 없어요.',ephemeral=True)
   await publish(i,await asyncio.to_thread(social.read,'crash',r['id']))
+

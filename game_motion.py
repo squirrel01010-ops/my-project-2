@@ -10,7 +10,7 @@ def frames(game):
  if game=='slots':return ['🎰 슬롯 회전 중\n\n🍒 │ 🔔 │ 🍋','🎰 슬롯 회전 중\n\n🍇 │ 🍒 │ 🔔','🎰 마지막 릴이 멈추는 중…\n\n🍇 │ 🔔 │ ❔']
  if game in ('coin','dice'):return ['🎲 데굴…\n\n⚀ ⤴','🎲 데구르르…\n\n⤵ ⚄','🎲 주사위가 멈추는 중…\n\n❔']
  if game=='horse':return ['🏁 경주 시작!\n① 🐎 ▫▫▫▫▫\n② 🐎 ▫▫▫▫▫\n③ 🐎 ▫▫▫▫▫\n④ 🐎 ▫▫▫▫▫\n⑤ 🐎 ▫▫▫▫▫','🏇 달리는 중…\n① ▫🐎 ▫▫▫▫\n② ▫▫🐎 ▫▫▫\n③ ▫🐎 ▫▫▫▫\n④ ▫▫🐎 ▫▫▫\n⑤ ▫🐎 ▫▫▫▫','🏁 결승선 앞!\n\n🏇 💨 🏇 💨 🏇\n\n최종 순위 확인 중…']
- if game in ('wheel','roulette'):return ['🎡 회전 시작\n\n🔴 ⚫ 🟢 🔴 ⚫\n⬆️','🎡 빙글빙글…\n\n⚫ 🔴 ⚫ 🟢 🔴\n　　 ⬆️','🎡 천천히 멈추는 중…\n\n🟢 ⚫ 🔴 ⚫ 🔴\n　　　　 ⬆️']
+ if game in ('wheel','roulette'):return ['🎡 회전 시작\n\n💨 0배 · 🪙 1배 · 💎 2배 · 👑 4배' if game=='wheel' else '🎡 회전 시작\n\n💨 0배 · 💎 2배 · 🌟 36배','🎡 빙글빙글…\n\n✨ ✨ ✨','🎡 천천히 멈추는 중…\n\n결과 확인 중…']
  if game=='scratch':return ['🎟️ 스크래치\n\n⬜ ⬜ ⬜','🪙 긁는 중…\n\n✨ ⬜ ⬜','🪙 마지막 칸 확인 중…\n\n✨ ✨ ⬜']
  if game in ('blackjack','highlow','indian'):return ['🃏 카드를 섞는 중…\n\n🂠 🂠 🂠','🃏 카드 이동 중…\n\n🂠 ➡️ 🂠','🃏 카드를 펼치는 중…\n\n🂠 ✨']
  if game=='mines':return ['⛏️ 땅을 파는 중…\n\n🟫 🟫 🟫','⛏️ 조심조심…\n\n🟫 ✨ 🟫','🔎 칸 확인 중…']
@@ -30,3 +30,4 @@ async def reveal(edit,r,final_embed,final_view):
   pass
  finally:
   await edit(embed=final_embed,view=final_view)
+

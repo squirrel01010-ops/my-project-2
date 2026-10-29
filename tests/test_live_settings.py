@@ -52,14 +52,14 @@ class LiveSettings(unittest.IsolatedAsyncioTestCase):
   message=SimpleNamespace(guild=SimpleNamespace(id=456),author=i.user,
                           channel=SimpleNamespace(id=789,category_id=None))
   await bot.on_message(message);await bot.on_message(message)
-  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],421)
+  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],475)
   self.save(chatXP=13,dailyCap=0)
   await bot.on_message(message)
-  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],434)
+  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],488)
   with self.assertRaisesRegex(ValueError,'이미 출석'):await bot.attendance.callback(self.interaction())
   self.save(excludedChannels=['789'])
   await bot.on_message(message)
-  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],434)
+  with core.db() as c:self.assertEqual(core.user(c,'123')['xp'],501)
 
  async def test_casino_saved_limits_roles_channels_and_enable_switch(self):
   self.save(attendanceXP=1000,gameCooldown=0,minBet=10,maxBet=500,casinoRoles=['55'],casinoChannels=['789'])

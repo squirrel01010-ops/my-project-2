@@ -43,12 +43,12 @@ class Economy(unittest.TestCase):
  def test_daily_attendance(self):
   result=self.op('attendance',{});self.assertEqual(result['streak'],1)
   with self.assertRaises(ValueError):self.op('attendance',{})
- def test_activity_exclusion_cap_and_cooldown(self):
-  self.op('settings',dict(dailyCap=30,cooldown=0,excludedChannels=['999']),admin=True)
-  self.assertEqual(core.activity('111','name','chat','999'),0)
+ def test_chat_ignores_exclusion_cap_and_cooldown(self):
+  self.op('settings',dict(dailyCap=30,cooldown=60,excludedChannels=['999']),admin=True)
+  self.assertEqual(core.activity('111','name','chat','999'),25)
   self.assertEqual(core.activity('111','name','chat','123'),25)
-  self.assertEqual(core.activity('111','name','chat','123'),5)
-  self.assertEqual(core.activity('111','name','chat','123'),0)
+  self.assertEqual(core.activity('111','name','chat','123'),25)
+  self.assertEqual(core.activity('111','name','chat','123'),25)
  def test_gift_fee(self):
   self.op('settings',dict(giftFee=10),admin=True);self.op('gift',dict(to='222',amount=100))
   self.assertEqual(self.xp(),99890);self.assertEqual(self.xp('222'),100)
@@ -133,3 +133,18 @@ class Rules(unittest.TestCase):
   self.assertTrue(s['done']);self.assertEqual(s['mult'],0)
 
 if __name__=='__main__':unittest.main()
+
+
+class ChatCounting(unittest.TestCase):
+ def test_message_replay_is_not_paid_twice_and_rapid_messages_all_count(self):
+  with tempfile.TemporaryDirectory() as d,patch.object(core,'DB',d+'/chat.db'):
+   core.init()
+   with concurrent.futures.ThreadPoolExecutor(8) as pool:
+    paid=list(pool.map(lambda n:core.activity('111','tester','chat','123',stamp=1000,message_id=n),range(30)))
+   self.assertEqual(paid,[25]*30)
+   self.assertEqual(core.activity('111','tester','chat','123',stamp=1001,message_id=0),0)
+   with core.db() as c:
+    self.assertEqual(core.user(c,'111')['xp'],750)
+    self.assertEqual(c.execute("SELECT SUM(amount) FROM activity WHERE kind='chat'").fetchone()[0],30)
+ def test_wheel_multiplier_icons_are_distinct(self):
+  self.assertEqual(len({games.multiplier_badge(n).split()[0] for n in (0,1,2,4,36)}),5)
