@@ -2,6 +2,7 @@
 from collections import Counter
 from itertools import combinations
 import secrets
+from games import outcome_odds as odds
 RNG=secrets.SystemRandom()
 LABELS=['하이 카드','원페어','투페어','트리플','스트레이트','플러시','풀하우스','포카드','스트레이트 플러시']
 
@@ -25,7 +26,7 @@ def take(p,amount):
  amount=min(amount,p['stack']);p['stack']-=amount;p['round']+=amount;p['total']+=amount;return amount
 
 def begin(s,now):
- deck=list(range(52));RNG.shuffle(deck);s.update(deck=deck,board=[],street='preflop',bet=s['blind'],min_raise=s['blind'],status='active',dealer=RNG.randrange(len(s['players'])),payouts={},history=[])
+ deck=list(range(52));deck=odds.deck(RNG,deck,s.get('outcomeWeights',[]),lambda c:c%13);s.update(deck=deck,board=[],street='preflop',bet=s['blind'],min_raise=s['blind'],status='active',dealer=RNG.randrange(len(s['players'])),payouts={},history=[])
  for p in s['players']:p.update(cards=[deck.pop(),deck.pop()],round=0,total=0,folded=False,acted=None)
  n=len(s['players']);d=s['dealer'];sb=d if n==2 else (d+1)%n;bb=(sb+1)%n
  take(s['players'][sb],max(1,s['blind']//2));take(s['players'][bb],s['blind']);s['turn']=(bb+1)%n
@@ -98,7 +99,7 @@ def act(s,uid,action,value,now):
 
 def view(s,viewer=None):
  # Explicit allowlist: never expose deck, burn cards or other players' hole cards.
- out={k:s[k] for k in ('id','host','channel','buyin','blind','status','created','lobby_end','revision','turn_seconds') if k in s}
+ out={k:s[k] for k in ('id','host','channel','buyin','blind','status','created','lobby_end','revision','turn_seconds','outcomeWeights') if k in s}
  for k in ('board','street','bet','min_raise','dealer','turn','deadline','message','payouts','pots','hands','history'):
   if k in s:out[k]=s[k]
  out['board']=[card(c) for c in s.get('board',[])]
@@ -109,3 +110,4 @@ def view(s,viewer=None):
   item['cards']=[card(c) for c in p.get('cards',[])] if reveal else ['🂠','🂠'] if 'cards' in p else []
   out['players'].append(item)
  return out
+

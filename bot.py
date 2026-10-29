@@ -168,6 +168,7 @@ async def game_help(i:discord.Interaction):
  e.add_field(name='🃏 선택하며 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if v[2]),inline=True)
  e.add_field(name='🤝 함께 즐기기',value='/홀덤 · /복권 · /크래시',inline=False)
  e.add_field(name='💎 이용 안내',value=f"최소 베팅 **{s['minBet']:,} 띵조코인** · 최대 한도 없음\n보유 코인 안에서 베팅할 수 있습니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
+ e.add_field(name='🎰 슬롯 배율',value=games.slot_rules(s['games']['slots']),inline=False)
  e.set_footer(text='✦ STELLAR · 서버 가상 띵조코인으로 즐기는 게임')
  await i.followup.send(embed=e,ephemeral=True)
 
@@ -393,4 +394,3 @@ async def main():
   raise SystemExit(message)
 social_bot.register(client,tree,GUILD_ID)
 if __name__=='__main__':asyncio.run(main())
-

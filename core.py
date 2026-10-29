@@ -12,6 +12,7 @@ from datetime import datetime,timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import games
+from games import outcome_odds as odds
 import social
 
 ROOT=Path(__file__).resolve().parent
@@ -27,7 +28,7 @@ DEFAULTS=dict(chatXP=25,cooldown=0,voiceXP=12,attendanceXP=50,streakBonus=10,str
  roleRewards=[],roleMode='highest',nicknameFormat='',levelChannel='',logChannel='',rankingChannel='',rankingInterval=3600,
  levelMessage='{user}님이 레벨 {level}에 도달했어요!',attendanceMessage='{user}님 출석 완료! +{xp} 띵조코인 · {streak}일 연속',
  embedColor='#9d85ff',boosts=[],seasonMode='off',seasonResetXP=False,seasonRewards=[],giftFee=0,
- social=social.DEFAULTS,
+ social=social.DEFAULTS,probabilities={},
  games={k:dict(enabled=True,fee=0,minBet=10,maxBet=10000) for k in games.CATALOG})
 
 @contextmanager
@@ -165,6 +166,10 @@ def validate_settings(value):
   if type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000:raise ValueError('룰렛 배율은 0~1000 사이 숫자여야 합니다')
  wheel=s['games']['wheel'].get('wheelMultipliers',[0,0,0,0,1,1,2,4])
  if not isinstance(wheel,list) or len(wheel)!=8 or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in wheel):raise ValueError('돌림판 배율은 0~1000 사이 숫자 8개를 입력하세요')
+ slot=s['games']['slots'];pair=slot.get('pairMultiplier',0.5);triples=slot.get('tripleMultipliers',games.SLOT_TRIPLES)
+ if not isinstance(triples,list) or len(triples)!=5:raise ValueError('슬롯 모양별 배율은 5개를 입력하세요')
+ if any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in [pair,*triples]):raise ValueError('슬롯 배율은 0~1000 사이 숫자여야 합니다')
+ s['probabilities']=odds.validate(s.get('probabilities',{}))
  s['social']=social.validate(s.get('social',{}))
  return s
 
@@ -285,7 +290,7 @@ def operate(actor,path,b,admin=False,context=None):
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
     if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')
-    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),cfg);adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
+    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),{**cfg,'outcomeWeights':s['probabilities'].get(g,[])});adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
     r=c.execute('SELECT * FROM game_rounds WHERE id=?',(rid,)).fetchone()
@@ -359,9 +364,9 @@ def state(uid=None,admin=False):
    'streak':[dict(r) for r in c.execute('SELECT u.id,u.name,CASE WHEN a.last_day>=? THEN a.streak ELSE 0 END score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY score DESC,u.id LIMIT 100',((today(s)-timedelta(days=1)).isoformat(),))]}
   products=[dict(r) for r in c.execute('SELECT p.*,(SELECT COUNT(DISTINCT i.code) FROM inventory i WHERE i.product_id=p.id AND i.order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes FROM products p'+('' if admin else ' WHERE active=1'))]
   heartbeat=c.execute("SELECT value FROM meta WHERE key='heartbeat'").fetchone();connected=bool(heartbeat and time.time()-float(heartbeat[0])<120)
-  visible=s if admin else {k:s[k] for k in ('minBet','maxBet','casino','games','giftFee','levelBase','gameTimeout','timezone','embedColor','social')}
+  visible=s if admin else {k:s[k] for k in ('minBet','maxBet','casino','games','giftFee','levelBase','gameTimeout','timezone','embedColor','social','probabilities')}
   last_backup=c.execute("SELECT value FROM meta WHERE key='last_backup'").fetchone()
-  return dict(social=social.snapshot(c,uid),socialCatalog=social.CATALOG,lastBackup=float(last_backup[0]) if last_backup and admin else None,users=us,settings=visible,connected=connected,rounds=rounds,products=products,orders=orders,seasons=seasons,rankings=rankings,
+  return dict(oddsCatalog=odds.CATALOG,social=social.snapshot(c,uid),socialCatalog=social.CATALOG,lastBackup=float(last_backup[0]) if last_backup and admin else None,users=us,settings=visible,connected=connected,rounds=rounds,products=products,orders=orders,seasons=seasons,rankings=rankings,
    ledger=[dict(r) for r in c.execute('SELECT * FROM ledger'+where+' ORDER BY id DESC LIMIT 100',params)],stats=stats if admin else [],
    casinoStats=[dict(r) for r in c.execute("SELECT game,COUNT(*) plays,SUM(bet) wagered,SUM(payout) paid FROM game_rounds WHERE status='done' GROUP BY game")] if admin else [],
    audit=[dict(r) for r in c.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 100')] if admin else [],
@@ -400,4 +405,3 @@ def desired_roles(uid):
   return want,managed,u,s
 
 init()
-

@@ -7,6 +7,7 @@ import time
 from datetime import datetime,timedelta
 from zoneinfo import ZoneInfo
 import poker
+from games import outcome_odds as odds
 
 DEFAULTS=dict(holdemEnabled=True,holdemMinBuyin=100,holdemMaxBuyin=10000,holdemLobby=120,holdemTurn=45,
  lotteryEnabled=True,lotteryPrice=100,lotteryHour=21,lotteryMaxTickets=20,lotteryFee=0,
@@ -45,14 +46,21 @@ def load(c,rid,kind):
 
 def public(s,viewer=None,now=None):
  if s['kind']=='holdem':return dict(kind='holdem',**poker.view(s,viewer))
- if s['kind']=='lottery':return {k:s[k] for k in ('id','kind','status','created','draw_at','price','max_tickets','fee','pot','rollover','winning','winners','paid','channel') if k in s}
- out={k:s[k] for k in ('id','kind','status','created','starts','channel','commitment','max_bet','min_bet')}
+ if s['kind']=='lottery':return {k:s[k] for k in ('id','kind','status','created','draw_at','price','max_tickets','fee','pot','rollover','winning','winners','paid','channel','outcomeWeights') if k in s}
+ out={k:s[k] for k in ('id','kind','status','created','starts','channel','commitment','max_bet','min_bet','outcomeWeights') if k in s}
  out['players']=[{k:p[k] for k in ('uid','name','bet','auto','status','payout','at') if k in p} for p in s['players']]
  out['multiplier']=min(s['crash']/100,multiplier(s,now or time.time())) if s['status']!='lobby' else 1
  if s['status']=='done':out.update(seed=s['seed'],crash=s['crash']/100)
  return out
 
-def crash_point(seed):
+def crash_point(seed,weights=None):
+ if weights:
+  point=int(hashlib.sha256((seed+':weighted-crash').encode()).hexdigest(),16)/2**256*sum(weights)
+  total=0
+  for value,weight in zip(odds.CRASH_POINTS,weights):
+   total+=weight
+   if point<total:return value
+  return odds.CRASH_POINTS[-1]
  h=int(hashlib.sha256((seed+':crash').encode()).hexdigest()[:13],16)
  return max(100,min(10000,(99*2**52)//(2**52-h)))
 
@@ -70,11 +78,12 @@ def ensure_draw(c,s,now):
  if not cfg['lotteryEnabled']:return None
  prev=c.execute("SELECT state FROM live_games WHERE kind='lottery' AND status='done' ORDER BY created DESC LIMIT 1").fetchone();rollover=json.loads(prev[0]).get('carry',0) if prev else 0
  d=dict(id=secrets.token_hex(12),kind='lottery',status='open',created=now,draw_at=next_draw(s,now),price=cfg['lotteryPrice'],max_tickets=cfg['lotteryMaxTickets'],fee=cfg['lotteryFee'],pot=0,rollover=rollover,channel=s['rankingChannel'])
+ d['outcomeWeights']=list(s.get('probabilities',{}).get('lottery',[]))
  save(c,d);return d
 
 def draw(c,s,now):
  from core import adjust,job
- winning=sorted(secrets.SystemRandom().sample(range(1,21),3));tickets=c.execute('SELECT * FROM lottery_tickets WHERE draw=? ORDER BY id',(s['id'],)).fetchall()
+ winning=sorted(odds.sample(secrets.SystemRandom(),list(range(1,21)),3,s.get('outcomeWeights',[])));tickets=c.execute('SELECT * FROM lottery_tickets WHERE draw=? ORDER BY id',(s['id'],)).fetchall()
  winners=[t for t in tickets if json.loads(t['numbers'])==winning];pool=s['rollover']+s['pot']-s['pot']*s['fee']//100
  s.update(winning=winning,winners=[],paid=0,carry=pool,status='done')
  if winners:
@@ -152,7 +161,7 @@ def operate(c,actor,path,b,admin,ctx):
   if action=='create':
    vacant();buyin=wager(b.get('buyin'),cfg['holdemMinBuyin'],user(c,actor)['xp']);blind=integer(b.get('blind'),2,max(2,buyin//10))
    if blind*10>buyin:raise ValueError('바이인은 빅블라인드의 10배 이상이어야 합니다')
-   s=dict(id=secrets.token_hex(12),kind='holdem',host=actor,channel=ctx.get('channel',''),status='lobby',created=now,lobby_end=now+cfg['holdemLobby'],buyin=buyin,blind=blind,turn_seconds=cfg['holdemTurn'],revision=0,players=[])
+   s=dict(id=secrets.token_hex(12),kind='holdem',host=actor,channel=ctx.get('channel',''),status='lobby',created=now,lobby_end=now+cfg['holdemLobby'],buyin=buyin,blind=blind,turn_seconds=cfg['holdemTurn'],revision=0,players=[],outcomeWeights=list(cfgs.get('probabilities',{}).get('holdem',[])))
   else:
    s=load(c,b.get('table'),kind)
    old_revision=s['revision']
@@ -202,8 +211,8 @@ def operate(c,actor,path,b,admin,ctx):
    channel=ctx.get('channel','');r=c.execute("SELECT state FROM live_games WHERE kind='crash' AND channel=? AND status IN ('lobby','flying') ORDER BY created DESC LIMIT 1",(channel,)).fetchone()
    if r:s=json.loads(r[0]);tick(c,s,now)
    if s is None or s['status']=='done':
-    seed=secrets.token_hex(32);point=crash_point(seed)
-    s=dict(id=secrets.token_hex(12),kind='crash',status='lobby',created=now,starts=now+cfg['crashLobby'],channel=channel,seed=seed,commitment=hashlib.sha256(seed.encode()).hexdigest(),crash=point,players=[],min_bet=max(cfg['crashMinBet'],cfgs['minBet']),max_bet=min(cfg['crashMaxBet'],cfgs['maxBet']))
+    seed=secrets.token_hex(32);weights=list(cfgs.get('probabilities',{}).get('crash',[]));point=crash_point(seed,weights)
+    s=dict(id=secrets.token_hex(12),kind='crash',status='lobby',created=now,starts=now+cfg['crashLobby'],channel=channel,seed=seed,commitment=hashlib.sha256(seed.encode()).hexdigest(),crash=point,outcomeWeights=weights,players=[],min_bet=max(cfg['crashMinBet'],cfgs['minBet']),max_bet=min(cfg['crashMaxBet'],cfgs['maxBet']))
    if b.get('round') and b['round']!=s['id']:raise ValueError('이 판은 이미 종료되었습니다. 새 회차에서 참여하세요')
    if s['status']!='lobby':raise ValueError('이미 출발했습니다. 다음 판에 참여하세요')
    if any(p['uid']==actor for p in s['players']):raise ValueError('이미 이 판에 베팅했습니다')
