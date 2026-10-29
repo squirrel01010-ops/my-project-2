@@ -39,7 +39,8 @@ def finish(s,mult,message):
  s.update(done=True,mult=mult,message=message)
  return s
 
-def start(game, choice=None):
+def start(game, choice=None, config=None):
+ config=config or {}
  if game not in CATALOG:raise ValueError('지원하지 않는 게임')
  s=dict(game=game,done=False,mult=0,message='',step=0)
  if game=='coin':
@@ -52,10 +53,13 @@ def start(game, choice=None):
   n=5 if game=='slots' else 4;s['symbols']=[RNG.randrange(n) for _ in range(3)]
   finish(s,n*n if len(set(s['symbols']))==1 else 0,'세 칸 일치!' if len(set(s['symbols']))==1 else '다음 기회에')
  elif game=='wheel':
-  s['segment']=RNG.randrange(8);m=[0,0,0,0,1,1,2,4][s['segment']];finish(s,m,f'{multiplier_badge(m)} 칸에 멈췄어요')
+  s['wheelMultipliers']=list(config.get('wheelMultipliers',[0,0,0,0,1,1,2,4]));s['segment']=RNG.randrange(8);m=s['wheelMultipliers'][s['segment']];finish(s,m,f'{multiplier_badge(m)} 칸에 멈췄어요')
  elif game=='roulette':
   if choice not in ('red','black','zero'):raise ValueError('red, black, zero 중 선택하세요')
-  r=RNG.randrange(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black';finish(s,(36 if r==0 else 2) if choice==color else 0,f"{r} · {color} · {multiplier_badge((36 if r==0 else 2) if choice==color else 0)}")
+  r=RNG.randrange(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black'
+  s['multipliers']={k:config.get(k+'Multiplier',36 if k=='zero' else 2) for k in ('red','black','zero')}
+  mult=s['multipliers'][color] if choice==color else 0
+  finish(s,mult,f"{r} · {dict(red='빨강',black='검정',zero='제로')[color]} · {multiplier_badge(mult)}")
  elif game=='horse':
   number(choice,1,5);s['order']=RNG.sample(list(range(1,6)),5);finish(s,5 if s['order'][0]==choice else 0,f"{s['order'][0]}번 말 우승")
  elif game=='blackjack':

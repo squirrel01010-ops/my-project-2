@@ -160,6 +160,11 @@ def validate_settings(value):
   cfg=s['games'].get(g)
   if not isinstance(cfg,dict) or type(cfg.get('enabled')) is not bool:raise ValueError('게임 설정을 확인하세요')
   integer(cfg.get('fee'),0,30);integer(cfg.get('minBet'),1);integer(cfg.get('maxBet'),1)
+ for k in ('redMultiplier','blackMultiplier','zeroMultiplier'):
+  v=s['games']['roulette'].get(k,36 if k=='zeroMultiplier' else 2)
+  if type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000:raise ValueError('룰렛 배율은 0~1000 사이 숫자여야 합니다')
+ wheel=s['games']['wheel'].get('wheelMultipliers',[0,0,0,0,1,1,2,4])
+ if not isinstance(wheel,list) or len(wheel)!=8 or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in wheel):raise ValueError('돌림판 배율은 0~1000 사이 숫자 8개를 입력하세요')
  s['social']=social.validate(s.get('social',{}))
  return s
 
@@ -280,7 +285,7 @@ def operate(actor,path,b,admin=False,context=None):
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
     if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')
-    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'));adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
+    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),cfg);adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
     r=c.execute('SELECT * FROM game_rounds WHERE id=?',(rid,)).fetchone()

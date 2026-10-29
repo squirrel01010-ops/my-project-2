@@ -68,22 +68,21 @@ async def operation(i,path,body):
  return await asyncio.to_thread(core.operate,str(i.user.id),path,{**body,'key':str(i.id)},False,context(i))
 
 def game_embed(r):
- s=r['state'];e=discord.Embed(title=GAME_ICONS[r['game']]+' '+games.CATALOG[r['game']][0],color=0x9d85ff)
- e.description=f"베팅 **{r['bet']:,} 띵조코인** · {'종료' if r['status']=='done' else '진행 중'}\n{s.get('message','')}"
- for k,label in [('roll','결과'),('symbols','릴'),('order','도착 순서'),('card','현재 카드'),('count','현재 숫자'),('player','내 카드'),('dealer','상대 카드'),('opened','선택한 칸'),('board','보드')]:
-  if k not in s:continue
-  value=s[k]
-  card=lambda n:'🂠' if n is None else str({1:'A',11:'J',12:'Q',13:'K'}.get(n,n))
-  if k=='symbols':value=' │ '.join(['🍒','🍋','🔔','⭐','💎'][n] for n in value)
-  elif k=='order':value=' → '.join(f'{n}번 🐎' for n in value)
-  elif k in ('player','dealer'):value=' '.join(map(card,value)) if isinstance(value,list) else card(value)
-  elif k=='card':value=card(value)
-  elif k=='opened':value=' · '.join(str(n+1)+'번' for n in value) or '아직 선택하지 않았어요'
-  elif k=='board':value='\n'.join(' '.join(value[n+j] or '⬜' for j in range(3)) for n in (0,3,6))
-  e.add_field(name=label,value=str(value)[:1024],inline=False)
- if r['status']=='done':e.add_field(name='정산',value=f"반환 {r['payout']:,} 띵조코인 · 순손익 {r['payout']-r['bet']:+,} 띵조코인")
- elif s.get('mult',0):e.add_field(name='현재 원금 포함 배당',value=f"{s['mult']:.3f}배 (수익 수수료 {r['fee']}%)")
- e.set_footer(text='게임 시간이 지나면 베팅금이 소멸합니다. /이어하기로 복구할 수 있어요.')
+ s=r['state'];done=r['status']=='done'
+ e=discord.Embed(title=GAME_ICONS[r['game']]+' '+games.CATALOG[r['game']][0],color=0x9d85ff)
+ if r['game'] in ('wheel','roulette'):
+  index=s.get('segment',0) if r['game']=='wheel' else game_motion.ROULETTE_RING.index(s.get('roll',0))
+  e.description=game_motion.spin_frame(r,index)
+ else:e.description=game_motion.board(r)
+ if s.get('message'):e.description+='\n'+s['message']
+ if done:
+  raw=int(r['bet']*s.get('mult',0));fee=max(0,raw-r.get('payout',0))
+  e.add_field(name='수익',value=f"**{max(0,r['payout']-r['bet']):,}** 띵조코인",inline=True)
+  e.add_field(name='수수료',value=f"**{fee:,}** 띵조코인",inline=True)
+ else:e.add_field(name='베팅',value=f"{r['bet']:,} 띵조코인",inline=True)
+ if r.get('uid'):
+  with core.db() as c:balance=core.user(c,r['uid'])['xp']
+  e.add_field(name='보유 코인',value=f"**{balance:,}** 띵조코인",inline=False)
  return e
 
 def game_view(r):
@@ -114,7 +113,12 @@ async def on_interaction(i):
    return await i.followup.send('결과 연출 중이에요. 잠시 후 눌러주세요.',ephemeral=True)
   game_motion.BUSY.add(rid)
   try:
+   def previous_state():
+    with core.db() as c:row=c.execute('SELECT * FROM game_rounds WHERE id=? AND uid=?',(rid,str(i.user.id))).fetchone()
+    return core.round_view(row)['state'] if row else {}
+   previous=await asyncio.to_thread(previous_state)
    r=await operation(i,'game/action',dict(round=rid,revision=int(rev),action=act,value=int(value) if value else None))
+   r['previous_state']=previous
    if act=='cashout':await i.edit_original_response(embed=game_embed(r),view=game_view(r))
    else:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
   finally:game_motion.BUSY.discard(rid)
@@ -148,6 +152,8 @@ async def gift(i:discord.Interaction,대상:discord.Member,금액:app_commands.R
 async def start_game(i,game,bet,choice=None):
  await i.response.defer()
  r=await operation(i,'play',dict(game=game,bet=bet,choice=choice))
+ if game in ('blackjack','indian','highlow'):r['previous_state']={}
+ elif games.CATALOG[game][2]:return await i.edit_original_response(embed=game_embed(r),view=game_view(r))
  game_motion.BUSY.add(str(r['id']))
  try:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
  finally:game_motion.BUSY.discard(str(r['id']))

@@ -10,7 +10,7 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
    edit=AsyncMock();final=object();view=object()
    with patch('game_motion.asyncio.sleep',new_callable=AsyncMock):
     await game_motion.reveal(edit,{'game':game},final,view)
-   self.assertEqual(edit.await_count,4)
+   self.assertEqual(edit.await_count,len(game_motion.sequence({'game':game}))+1)
    self.assertIs(edit.await_args.kwargs['embed'],final)
    self.assertIs(edit.await_args.kwargs['view'],view)
    for call in edit.await_args_list[:-1]:self.assertEqual(len(call.kwargs['view'].children),0)
@@ -19,3 +19,15 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
   final=object()
   await game_motion.reveal(edit,{'game':'slots'},final,None)
   self.assertIs(edit.await_args.kwargs['embed'],final)
+
+ def test_all_final_frames_match_result(self):
+  for game in games.CATALOG:
+   choice={'coin':'odd','dice':1,'roulette':'red','horse':1}.get(game)
+   s=games.public_view(games.start(game,choice))
+   r={'game':game,'state':s,'status':'done' if s['done'] else 'active','previous_state':{}}
+   seq=game_motion.sequence(r)
+   if game not in ('wheel','roulette'):self.assertEqual(seq[-1][0],game_motion.board(r))
+   else:
+    index=s['segment'] if game=='wheel' else game_motion.ROULETTE_RING.index(s['roll'])
+    self.assertEqual(seq[-1][0],game_motion.spin_frame(r,index))
+    self.assertGreater(seq[-1][1],seq[0][1])
