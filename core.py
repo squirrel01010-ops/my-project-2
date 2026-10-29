@@ -74,6 +74,8 @@ def init():
   c.execute('CREATE INDEX IF NOT EXISTS rounds_user_status ON game_rounds(uid,status)')
   c.execute('CREATE TABLE IF NOT EXISTS chat_health(id INTEGER PRIMARY KEY,last_received REAL,last_paid REAL,processed INTEGER DEFAULT 0,duplicates INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,last_error TEXT,last_failure REAL)')
   c.execute('INSERT OR IGNORE INTO chat_health(id) VALUES(1)')
+  c.execute("CREATE TABLE IF NOT EXISTS chat_inbox(id TEXT PRIMARY KEY,payload TEXT,status TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,next_retry REAL DEFAULT 0,last_error TEXT DEFAULT '',created REAL,updated REAL)")
+  c.execute('CREATE INDEX IF NOT EXISTS chat_inbox_due ON chat_inbox(status,next_retry)')
   c.execute('CREATE INDEX IF NOT EXISTS ledger_date ON ledger(created)')
   social.init(c)
   c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)',(json.dumps(DEFAULTS),))
@@ -190,10 +192,10 @@ def validate_settings(value):
  s['social']=social.validate(s.get('social',{}))
  return s
 
-def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=None):
+def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=None,settings_snapshot=None):
  now=stamp if stamp is not None else time.time()
  with db(True) as c:
-  s=settings(c);uid=ensure(c,uid,name)
+  s=settings(c) if settings_snapshot is None else settings_snapshot;uid=ensure(c,uid,name)
   if kind not in ('chat','voice'):raise ValueError('활동 종류 오류')
   if kind=='chat':
    c.execute('UPDATE chat_health SET last_received=? WHERE id=1',(time.time(),))
@@ -310,7 +312,7 @@ def operate(actor,path,b,admin=False,context=None):
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
     if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')
-    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),{**cfg,'outcomeWeights':s['probabilities'].get(g,[])});adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
+    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),{**cfg,'outcomeWeights':s['probabilities'].get(g,[])});st['choice']=b.get('choice');adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
     r=c.execute('SELECT * FROM game_rounds WHERE id=?',(rid,)).fetchone()
@@ -368,35 +370,35 @@ def leaderboard(limit=20):
   for u in rows:u['level']=level(u['xp'],s)
   return dict(users=rows)
 
-def state(uid=None,admin=False):
- maintenance()
+def state(uid=None,admin=False,section=None):
+ if section in (None,'casino','shop','seasons'):maintenance()
  with db() as c:
-  s=settings(c);us=[dict(x) for x in c.execute('SELECT * FROM users ORDER BY xp DESC,id LIMIT 1000')]
+  s=settings(c);us=[dict(x) for x in c.execute('SELECT * FROM users ORDER BY xp DESC,id LIMIT 1000')] if section in (None,'overview','members','casino','shop') else []
   for u in us:u['level']=level(u['xp'],s)
   where='' if admin else ' WHERE uid=?';params=() if admin else (uid,)
-  rounds=[round_view(r) for r in c.execute('SELECT * FROM game_rounds'+where+' ORDER BY created DESC LIMIT 30',params)]
-  orders=[dict(r) for r in c.execute('SELECT * FROM orders'+where+' ORDER BY created DESC LIMIT 100',params)]
+  rounds=[round_view(r) for r in c.execute('SELECT * FROM game_rounds'+where+' ORDER BY created DESC LIMIT 30',params)] if section in (None,'casino') else []
+  orders=[dict(r) for r in c.execute('SELECT * FROM orders'+where+' ORDER BY created DESC LIMIT 100',params)] if section in (None,'shop') else []
   if admin:
    for order in orders:
     if order['uid']!=uid:order['code']=None  # Codes are disclosed only to the purchasing member.
-  stats=[dict(r) for r in c.execute('SELECT day,channel,kind,SUM(amount) amount,SUM(xp) xp,COUNT(DISTINCT uid) members FROM activity WHERE day>=? GROUP BY day,channel,kind ORDER BY day',((today(s)-timedelta(days=30)).isoformat(),))]
-  seasons=[dict(r) for r in c.execute('SELECT * FROM seasons ORDER BY id DESC LIMIT 24')]
+  stats=[dict(r) for r in c.execute('SELECT day,channel,kind,SUM(amount) amount,SUM(xp) xp,COUNT(DISTINCT uid) members FROM activity WHERE day>=? GROUP BY day,channel,kind ORDER BY day',((today(s)-timedelta(days=30)).isoformat(),))] if section in (None,'overview') and admin else []
+  seasons=[dict(r) for r in c.execute('SELECT * FROM seasons ORDER BY id DESC LIMIT 24')] if section in (None,'seasons','overview') else []
   for season in seasons:
    season['snapshot']=json.loads(season['snapshot'] or '[]')
    if season['status']=='active':season['snapshot']=[dict(r) for r in c.execute('SELECT u.id,u.name,ss.score FROM season_scores ss JOIN users u ON ss.uid=u.id WHERE season_id=? ORDER BY score DESC,u.id LIMIT 100',(season['id'],))]
   rankings={
    'monthly':[dict(r) for r in c.execute("SELECT u.id,u.name,SUM(l.delta) score FROM ledger l JOIN users u ON l.uid=u.id WHERE l.created>=? GROUP BY u.id ORDER BY score DESC,u.id LIMIT 100",(datetime.combine(today(s).replace(day=1),datetime.min.time(),ZoneInfo(s['timezone'])).astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%d %H:%M:%S'),))],
    'attendance':[dict(r) for r in c.execute('SELECT u.id,u.name,a.total score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY a.total DESC,u.id LIMIT 100')],
-   'streak':[dict(r) for r in c.execute('SELECT u.id,u.name,CASE WHEN a.last_day>=? THEN a.streak ELSE 0 END score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY score DESC,u.id LIMIT 100',((today(s)-timedelta(days=1)).isoformat(),))]}
-  products=[dict(r) for r in c.execute('SELECT p.*,(SELECT COUNT(DISTINCT i.code) FROM inventory i WHERE i.product_id=p.id AND i.order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes FROM products p'+('' if admin else ' WHERE active=1'))]
+   'streak':[dict(r) for r in c.execute('SELECT u.id,u.name,CASE WHEN a.last_day>=? THEN a.streak ELSE 0 END score FROM attendance a JOIN users u ON a.uid=u.id ORDER BY score DESC,u.id LIMIT 100',((today(s)-timedelta(days=1)).isoformat(),))]} if section in (None,'members') else {}
+  products=[dict(r) for r in c.execute('SELECT p.*,(SELECT COUNT(DISTINCT i.code) FROM inventory i WHERE i.product_id=p.id AND i.order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes FROM products p'+('' if admin else ' WHERE active=1'))] if section in (None,'shop') else []
   heartbeat=c.execute("SELECT value FROM meta WHERE key='heartbeat'").fetchone();connected=bool(heartbeat and time.time()-float(heartbeat[0])<120)
   visible=s if admin else {k:s[k] for k in ('minBet','maxBet','casino','games','giftFee','levelBase','gameTimeout','timezone','embedColor','social','probabilities')}
   last_backup=c.execute("SELECT value FROM meta WHERE key='last_backup'").fetchone()
-  return dict(oddsCatalog=odds.CATALOG,social=social.snapshot(c,uid),socialCatalog=social.CATALOG,lastBackup=float(last_backup[0]) if last_backup and admin else None,users=us,settings=visible,connected=connected,rounds=rounds,products=products,orders=orders,seasons=seasons,rankings=rankings,
-   ledger=[dict(r) for r in c.execute('SELECT * FROM ledger'+where+' ORDER BY id DESC LIMIT 100',params)],stats=stats if admin else [],
-   casinoStats=[dict(r) for r in c.execute("SELECT game,COUNT(*) plays,SUM(bet) wagered,SUM(payout) paid FROM game_rounds WHERE status='done' GROUP BY game")] if admin else [],
-   audit=[dict(r) for r in c.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 100')] if admin else [],
-   jobs=[dict(r) for r in c.execute("SELECT id,kind,status,error,created FROM jobs WHERE status!='done' ORDER BY id DESC LIMIT 50")] if admin else [],
+  return dict(oddsCatalog=odds.CATALOG,social=social.snapshot(c,uid) if section in (None,'social') else {k:[] for k in ('holdem','lottery','crash','tickets')},socialCatalog=social.CATALOG,lastBackup=float(last_backup[0]) if last_backup and admin else None,users=us,settings=visible,connected=connected,rounds=rounds,products=products,orders=orders,seasons=seasons,rankings=rankings,
+   ledger=[dict(r) for r in c.execute('SELECT * FROM ledger'+where+' ORDER BY id DESC LIMIT 100',params)] if section in (None,'logs') else [],stats=stats if admin else [],
+   casinoStats=[dict(r) for r in c.execute("SELECT game,COUNT(*) plays,SUM(bet) wagered,SUM(payout) paid FROM game_rounds WHERE status='done' GROUP BY game")] if admin and section in (None,'logs') else [],
+   audit=[dict(r) for r in c.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 100')] if admin and section in (None,'logs') else [],
+   jobs=[dict(r) for r in c.execute("SELECT id,kind,status,error,created FROM jobs WHERE status!='done' ORDER BY id DESC LIMIT 50")] if admin and section in (None,'logs') else [],
    catalog={k:dict(name=v[0],rules=v[1],interactive=v[2]) for k,v in games.CATALOG.items()},me=user(c,uid) if uid and c.execute('SELECT 1 FROM users WHERE id=?',(uid,)).fetchone() else None)
 
 def expire_rounds(c,now,uid=None):
@@ -409,6 +411,7 @@ def expire_rounds(c,now,uid=None):
 def maintenance():
  with db(True) as c:
   now=time.time()
+  c.execute("DELETE FROM chat_inbox WHERE status='paid' AND updated<?",(now-604800,))
   social.maintenance(c,settings(c),now)
   expire_rounds(c,now)
   expired=c.execute("SELECT * FROM orders WHERE status='active' AND expires IS NOT NULL AND expires<?",(now,)).fetchall()
@@ -436,7 +439,8 @@ def chat_health():
  with db() as c:
   row=c.execute('SELECT * FROM chat_health WHERE id=1').fetchone()
   s=settings(c)
-  return dict(row or {},reward=s['chatXP'])
+  pending=c.execute("SELECT COUNT(*) FROM chat_inbox WHERE status!='paid'").fetchone()[0]
+  return dict(row or {},reward=s['chatXP'],pending=pending)
 
 def chat_failure(error):
  with db(True) as c:c.execute("UPDATE chat_health SET failures=failures+1,last_error=?,last_failure=?,last_received=? WHERE id=1",(type(error).__name__,time.time(),time.time()))
@@ -480,3 +484,44 @@ def social_state(uid,kind):
   result={kind:[social.public(json.loads(r[0]),uid) for r in rows]}
   if kind=='lottery':result['tickets']=[dict(r,numbers=json.loads(r['numbers'])) for r in c.execute('SELECT * FROM lottery_tickets WHERE uid=? ORDER BY rowid DESC LIMIT 100',(uid,))]
   return dict(social=result,settings=dict(social=s['social'],timezone=s['timezone'],casino=s['casino']),serverTime=time.time())
+
+
+def queue_chat(message_id,payload):
+ now=time.time()
+ with db(True) as c:
+  settings_now=settings(c)
+  payload={**payload,'reward_settings':{k:settings_now[k] for k in ('chatXP','boosts','timezone','levelBase')}}
+  added=c.execute('INSERT OR IGNORE INTO chat_inbox(id,payload,created,updated) VALUES(?,?,?,?)',(str(message_id),json.dumps(payload),now,now)).rowcount
+  c.execute('UPDATE chat_health SET last_received=?,duplicates=duplicates+? WHERE id=1',(now,0 if added else 1))
+ return bool(added)
+
+def deliver_chat(message_id):
+ now=time.time()
+ with db(True) as c:
+  if not c.execute("UPDATE chat_inbox SET status='processing',attempts=attempts+1,next_retry=?,updated=? WHERE id=? AND ((status='pending' AND next_retry<=?) OR (status='processing' AND next_retry<=?))",(now+120,now,str(message_id),now,now)).rowcount:return False
+  row=c.execute('SELECT * FROM chat_inbox WHERE id=?',(str(message_id),)).fetchone()
+ try:
+  p=json.loads(row['payload'])
+  activity(p['uid'],p['name'],'chat',p['channel'],p['roles'],p['category'],stamp=p['stamp'],message_id=str(message_id),settings_snapshot=p.get('reward_settings'))
+ except Exception as e:
+  with db(True) as c:c.execute("UPDATE chat_inbox SET status='pending',next_retry=?,last_error=?,updated=? WHERE id=?",(time.time()+min(300,2**min(row['attempts'],8)),type(e).__name__,time.time(),str(message_id)))
+  chat_failure(e);return False
+ with db(True) as c:c.execute("UPDATE chat_inbox SET status='paid',payload='{}',last_error='',updated=? WHERE id=?",(time.time(),str(message_id)))
+ return True
+
+def recover_chat(limit=50):
+ with db() as c:ids=[r[0] for r in c.execute("SELECT id FROM chat_inbox WHERE status IN ('pending','processing') AND next_retry<=? ORDER BY next_retry LIMIT ?",(time.time(),limit))]
+ return sum(deliver_chat(mid) for mid in ids)
+
+def resume_game(uid):
+ with db(True) as c:
+  expire_rounds(c,time.time(),uid)
+  r=c.execute("SELECT * FROM game_rounds WHERE uid=? AND status='active' ORDER BY created DESC LIMIT 1",(uid,)).fetchone()
+  return round_view(r) if r else None
+
+def shop_catalog(uid,page=1):
+ page=integer(page,1,100000);now=time.time()
+ with db() as c:
+  total=c.execute('SELECT COUNT(*) FROM products WHERE active=1').fetchone()[0]
+  rows=[dict(r) for r in c.execute("SELECT p.*,(SELECT COUNT(DISTINCT code) FROM inventory i WHERE product_id=p.id AND order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes,EXISTS(SELECT 1 FROM orders o WHERE o.uid=? AND o.role_id=p.role_id AND o.status='active' AND (o.expires IS NULL OR o.expires>?)) owned FROM products p WHERE active=1 ORDER BY id LIMIT 10 OFFSET ?",(uid,now,(page-1)*10))]
+  return dict(products=rows,page=page,pages=max(1,(total+9)//10))

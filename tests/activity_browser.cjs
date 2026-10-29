@@ -16,6 +16,12 @@ const fs=require('node:fs');const os=require('node:os');const path=require('node
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Activity mobile overflow');
   await page.screenshot({path:'/workspace/stellar/preview-activity-mobile.png',fullPage:true});
   await page.locator('[data-page="history"]').click();await page.locator('#history-filter button').click();await page.locator('#history-next').waitFor();
+  await page.locator('[data-page="casino"]').click();await page.locator('[data-game="slots"]').waitFor();
+  await page.locator('[data-game="slots"]').locator('xpath=following-sibling::button').click();
+  if(await page.locator('[data-game]').first().getAttribute('data-game')!=='slots')throw Error('Favorite not sorted first');
+  await page.locator('[data-game="slots"]').click();await page.getByRole('button',{name:'최소',exact:true}).click();
+  await page.locator('#close-modal').click();
+  await page.locator('[data-page="shop"]').click();await page.getByText('아직 등록된 상품이 없어요.').waitFor();
   await page.locator('[data-page="social"]').click();
   let light=false,full=false;page.on('request',r=>{if(r.url().includes('/api/social?'))light=true;if(r.url().endsWith('/api/state'))full=true});
   await page.waitForTimeout(4000);if(!light||full)throw Error('Social polling did not use light endpoint');

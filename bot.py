@@ -168,6 +168,7 @@ async def game_help(i:discord.Interaction):
  e.add_field(name='🃏 선택하며 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if v[2]),inline=True)
  e.add_field(name='🤝 함께 즐기기',value='/홀덤 · /복권 · /크래시',inline=False)
  e.add_field(name='💎 이용 안내',value=f"최소 베팅 **{s['minBet']:,} 띵조코인** · 최대 한도 없음\n보유 코인 안에서 베팅할 수 있습니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
+ e.add_field(name='🛠️ 일반 기능',value='/출석 · /내정보 · /랭킹 · /선물 · /상점 · /구매',inline=False)
  e.add_field(name='🎰 슬롯 배율',value=games.slot_rules(s['games']['slots']),inline=False)
  e.set_footer(text='✦ STELLAR · 서버 가상 띵조코인으로 즐기는 게임')
  await i.followup.send(embed=e,ephemeral=True)
@@ -209,16 +210,23 @@ for game,name in SIMPLE_GAMES.items():register_game_command(game,name)
 @tree.command(name='이어하기',description='진행 중인 게임의 버튼을 다시 불러와요')
 async def resume(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
- with core.db() as c:r=c.execute("SELECT * FROM game_rounds WHERE uid=? AND status='active'",(str(i.user.id),)).fetchone()
+ r=await asyncio.to_thread(core.resume_game,str(i.user.id))
  if not r:return await i.response.send_message('진행 중인 게임이 없어요',ephemeral=True)
- r=core.round_view(r);await i.response.send_message(embed=game_embed(r),view=game_view(r))
+ await i.response.send_message(embed=game_embed(r),view=game_view(r))
 
-@tree.command(name='상점',description='구매 가능한 상품을 확인해요')
-async def shop(i:discord.Interaction):
+@tree.command(name='상점',description='구매 가능한 상품을 페이지별로 확인해요')
+async def shop(i:discord.Interaction,페이지:app_commands.Range[int,1]=1):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
- with core.db() as c:products=c.execute('SELECT * FROM products WHERE active=1 ORDER BY id LIMIT 25').fetchall()
- text='\n'.join(f"`#{p['id']}` {p['name']} · {p['price']:,} 띵조코인" for p in products) or '등록된 상품이 없어요'
- await i.response.send_message(embed=discord.Embed(title='띵조코인 상점',description=text+'\n`/구매 상품번호`로 구매하세요',color=0x9d85ff),ephemeral=True)
+ await i.response.defer(ephemeral=True)
+ result=await asyncio.to_thread(core.shop_catalog,str(i.user.id),페이지)
+ text='\n'.join(f"`#{p['id']}` {p['name'][:100]} · {p['price']:,} 띵조코인"+(' · 보유 중' if p['kind']=='role' and p['owned'] else ' · 품절' if p['stock']==0 or p['kind']=='code' and p['codes']==0 else '') for p in result['products']) or '상품이 없어요'
+ e=discord.Embed(title=f"상점 · {result['page']}/{result['pages']} 페이지",description=text+'\n`/구매 상품번호`로 구매하세요',color=0x9d85ff)
+ view=discord.ui.View(timeout=120)
+ for label,number in [('← 이전',페이지-1),('다음 →',페이지+1)]:
+  button=discord.ui.Button(label=label,disabled=number<1 or number>result['pages'])
+  async def turn(interaction,page=number):await shop.callback(interaction,page)
+  button.callback=turn;view.add_item(button)
+ await i.followup.send(embed=e,view=view,ephemeral=True)
 
 @tree.command(name='구매',description='상점 상품을 구매해요')
 async def buy(i:discord.Interaction,상품번호:int):
@@ -255,21 +263,18 @@ async def on_message(message):
  roles=[str(r.id) for r in getattr(message.author,'roles',[])]
  channel=message.channel;category=getattr(channel,'category_id',None) or getattr(getattr(channel,'parent',None),'category_id','')
  stamp=message.created_at.timestamp() if getattr(message,'created_at',None) else time.time()
+ payload=dict(uid=str(message.author.id),name=getattr(message.author,'display_name',str(message.author)),channel=str(channel.id),roles=roles,category=str(category or ''),stamp=stamp)
+ mid=getattr(message,'id',None)
+ if mid is None:
+  return await asyncio.to_thread(core.activity,payload['uid'],payload['name'],'chat',payload['channel'],roles,payload['category'],stamp=stamp)
  for attempt in range(6):
   try:
-   await asyncio.to_thread(core.activity,str(message.author.id),getattr(message.author,'display_name',str(message.author)),'chat',str(channel.id),roles,str(category or ''),stamp=stamp,message_id=getattr(message,'id',None))
-   return
-  except sqlite3.OperationalError as e:
-   if not any(word in str(e).lower() for word in ('locked','busy')) or attempt==5:
-    logging.exception('Chat reward failed: message_id=%s',message.id)
-    try:await asyncio.to_thread(core.chat_failure,e)
-    except sqlite3.Error:logging.exception('Chat failure status could not be saved')
-    raise
-   await asyncio.sleep(min(0.25*2**attempt,4))
-  except Exception as e:
-   try:await asyncio.to_thread(core.chat_failure,e)
-   except sqlite3.Error:logging.exception('Chat failure status could not be saved')
-   raise
+   await asyncio.to_thread(core.queue_chat,mid,payload)
+   break
+  except sqlite3.OperationalError:
+   if attempt==5:raise
+   await asyncio.sleep(min(4,.25*2**attempt))
+ await asyncio.to_thread(core.deliver_chat,mid)
 
 @client.event
 async def on_voice_state_update(member,before,after):
@@ -369,7 +374,18 @@ async def worker():
   await update_ranking(guild)
  except Exception as e:
   with core.db(True) as c:core.audit(c,'bot','worker-error',dict(type=type(e).__name__))
- with core.db(True) as c:c.execute("INSERT INTO meta VALUES('heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(time.time()),))
+
+
+@tasks.loop(seconds=15)
+async def heartbeat_tick():
+ if client.is_ready() and client.get_guild(GUILD_ID) is not None:
+  def save():
+   with core.db(True) as c:c.execute("INSERT INTO meta VALUES('heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(time.time()),))
+  await asyncio.to_thread(save)
+
+@tasks.loop(seconds=10)
+async def chat_recovery():
+ await asyncio.to_thread(core.recover_chat)
 
 @tasks.loop(seconds=60)
 async def voice_tick():
@@ -398,6 +414,8 @@ async def reconcile():
 async def on_ready():
  if not sync_commands.is_running():sync_commands.start()
  if not client.get_guild(GUILD_ID):print('지정된 서버에 봇을 초대하세요.',flush=True);return
+ if not heartbeat_tick.is_running():heartbeat_tick.start()
+ if not chat_recovery.is_running():chat_recovery.start()
  if not worker.is_running():worker.start()
  if not voice_tick.is_running():voice_tick.start()
  if not reconcile.is_running():reconcile.start()
@@ -420,4 +438,8 @@ async def main():
   command_status(state='error',count=0,message=message)
   raise SystemExit(message)
 social_bot.register(client,tree,GUILD_ID)
+for command in tree.get_commands():
+ category='관리' if command.name in ('포인트관리','관리') else '기능' if command.name in ('출석','내정보','랭킹','선물','상점','구매') else '게임'
+ command.description=f'[{category}] '+command.description
+
 if __name__=='__main__':asyncio.run(main())
