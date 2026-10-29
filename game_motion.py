@@ -58,8 +58,8 @@ def horse_track(order,tick):
  lines=[]
  for horse in range(1,6):
   pos=horse_position(order,horse,tick)
-  lines.append(f'{horse} '+ '·'*pos+'🐎'+'·'*(RACE_LENGTH-pos)+'🏁')
- return box('START → FINISH\n\n'+'\n'.join(lines))
+  lines.append(f'{horse} 🏁'+ '·'*(RACE_LENGTH-pos)+'🐎'+'·'*pos+'┃')
+ return box('FINISH ← START\n\n'+'\n'.join(lines))
 
 def board(r):
  g=r['game'];s=r.get('state',{});done=r.get('status')=='done'

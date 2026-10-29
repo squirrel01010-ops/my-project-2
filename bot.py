@@ -179,9 +179,17 @@ async def casino_help(i:discord.Interaction):
 async def coin_command(i:discord.Interaction,베팅:app_commands.Range[int,1],선택:str):
  await start_game(i,'coin',베팅,선택)
 
-@tree.command(name='주사위',description='1~6 중 나올 숫자를 맞혀요')
-async def dice_command(i:discord.Interaction,베팅:app_commands.Range[int,1],숫자:app_commands.Range[int,1,6]):
- await start_game(i,'dice',베팅,숫자)
+@tree.command(name='주사위',description='숫자 맞추기 6배 또는 홀짝 맞추기 2배를 선택해요')
+@app_commands.choices(방식=[app_commands.Choice(name='숫자 맞추기 · 6배',value='number'),app_commands.Choice(name='홀짝 맞추기 · 2배',value='parity')],홀짝=[app_commands.Choice(name='홀수',value='odd'),app_commands.Choice(name='짝수',value='even')])
+async def dice_command(i:discord.Interaction,베팅:app_commands.Range[int,1],방식:str,숫자:app_commands.Range[int,1,6]=None,홀짝:str=None):
+ if 방식=='number':
+  if 숫자 is None or 홀짝 is not None:raise ValueError('숫자 맞추기는 숫자 1~6만 선택하세요')
+  choice=숫자
+ elif 방식=='parity':
+  if 홀짝 not in ('odd','even') or 숫자 is not None:raise ValueError('홀짝 맞추기는 홀짝에서 홀수 또는 짝수만 선택하세요')
+  choice=홀짝
+ else:raise ValueError('숫자 맞추기 또는 홀짝 맞추기를 선택하세요')
+ await start_game(i,'dice',베팅,choice)
 
 @tree.command(name='룰렛',description='빨강·검정·제로 중 선택해 룰렛을 돌려요')
 @app_commands.choices(선택=[app_commands.Choice(name='빨강',value='red'),app_commands.Choice(name='검정',value='black'),app_commands.Choice(name='제로 (0)',value='zero')])

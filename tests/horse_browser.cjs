@@ -19,7 +19,7 @@ const fs=require('node:fs');const os=require('node:os');const path=require('node
   });
   if(result.overflow)throw Error('Mobile overflow');
   if(result.final.includes('수수료'))throw Error('Fee shown on loss');
-  for(let horse=1;horse<=5;horse++){let last=0;for(const text of result.snapshots){const row=text.split('\n').find(x=>x.startsWith(horse+' '));const pos=row.indexOf('🐎')-2;if(pos<last)throw Error('Horse moved backwards');last=pos}if(last!==24)throw Error('Horse did not finish')}
+  for(let horse=1;horse<=5;horse++){let last=0;for(const text of result.snapshots){const row=text.split('\n').find(x=>x.startsWith(horse+' '));const pos=row.split('🐎')[1].replace('┃','').length;if(pos<last)throw Error('Horse moved backwards');last=pos}if(last!==24)throw Error('Horse did not finish')}
   await page.screenshot({path:'/workspace/stellar/preview-horse-mobile.png'});
   if(errors.length)throw Error(errors.join('\n'));
   console.log('Mobile race: forward movement, finish and loss fee checks passed');

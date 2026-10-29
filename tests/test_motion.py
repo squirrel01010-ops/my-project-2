@@ -39,11 +39,11 @@ class HorseMotion(unittest.TestCase):
    r=dict(game='horse',state=dict(order=list(order)),status='done')
    positions={h:[] for h in order}
    for text,_ in game_motion.sequence(r):
-    lanes=re.findall(r'^([1-5]) (·*)🐎(·*)🏁$',text,re.M)
+    lanes=re.findall(r'^([1-5]) 🏁(·*)🐎(·*)┃$',text,re.M)
     self.assertEqual([int(h) for h,_,_ in lanes],[1,2,3,4,5])
     for h,before,after in lanes:
      self.assertEqual(len(before)+len(after),24)
-     positions[int(h)].append(len(before))
+     positions[int(h)].append(len(after))
    for path in positions.values():
     self.assertEqual(path,sorted(path));self.assertEqual(path[0],0);self.assertEqual(path[-1],24)
    finish=sorted(order,key=lambda h:positions[h].index(24))
