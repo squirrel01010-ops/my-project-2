@@ -1,5 +1,5 @@
 [Unit]
-Description=ORBIT Discord Bot
+Description=STELLAR Discord Bot
 After=network-online.target
 Wants=network-online.target
 [Service]
