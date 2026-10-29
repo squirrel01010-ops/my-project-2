@@ -28,7 +28,7 @@ SECURE=ORIGIN.startswith('https://')
 def digest(v):return hashlib.sha256(v.encode()).hexdigest()
 def discord_api(path,token,method='GET',data=None,bearer=False):
  raw=urllib.parse.urlencode(data).encode() if data is not None else None
- headers={'User-Agent':'OrbitBot/1.0'}
+ headers={'User-Agent':'StellarBot/1.0'}
  if token:headers['Authorization']=('Bearer ' if bearer else 'Bot ')+token
  if raw:headers['Content-Type']='application/x-www-form-urlencoded'
  req=urllib.request.Request('https://discord.com/api/v10/'+path,data=raw,headers=headers,method=method)
@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
     with core.db() as c:
      for r in c.execute('SELECT * FROM ledger ORDER BY id'):
       writer.writerow(["'"+str(x) if isinstance(x,str) and x.startswith(('=','+','-','@','\t','\r')) else x for x in r])
-    return self.send(200,stream.getvalue().encode('utf-8-sig'),'text/csv',{'Content-Disposition':'attachment; filename="orbit-ledger.csv"'})
+    return self.send(200,stream.getvalue().encode('utf-8-sig'),'text/csv',{'Content-Disposition':'attachment; filename="stellar-ledger.csv"'})
    self.send(404,dict(error='페이지를 찾을 수 없습니다'))
   except PermissionError as e:self.send(403,dict(error=str(e)))
   except ValueError as e:self.send(400,dict(error=str(e)))
@@ -146,5 +146,5 @@ def serve():
  threading.Thread(target=housekeeping,daemon=True).start()
  host=os.getenv('HOST','127.0.0.1');port=int(os.getenv('PORT','8080'))
  if host not in ('127.0.0.1','localhost') and not SECURE:raise RuntimeError('외부 접속은 HTTPS PUBLIC_URL 설정 후 사용하세요')
- print(f'ORBIT web: {ORIGIN}',flush=True);ThreadingHTTPServer((host,port),Handler).serve_forever()
+ print(f'STELLAR web: {ORIGIN}',flush=True);ThreadingHTTPServer((host,port),Handler).serve_forever()
 if __name__=='__main__':serve()
