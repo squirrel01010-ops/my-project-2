@@ -57,7 +57,7 @@ def game_embed(r):
   e.set_footer(text=' · '.join(footer));return e
  e=discord.Embed(title=games.CATALOG[r['game']][0],color=(0x2ecc71 if net>=0 else 0xe74c3c) if done else 0x9d85ff)
  if r['game']=='wheel' and done:e.title=f"🎡 돌림판 → ×{s.get('wheelMultipliers',[0,0,0,0,1,1,2,4])[s['segment']]} 당첨!"
- e.description=f"베팅 **{r['bet']:,} EXP** · {'종료' if r['status']=='done' else '진행 중'}\n{s.get('message','')}"
+ e.description=f"베팅 **{r['bet']:,} EXP** · {'결과' if r['status']=='done' else '선택 대기'}\n{s.get('message','')}"
  for k,label in [('roll','결과'),('symbols','릴'),('order','도착 순서'),('card','현재 카드'),('count','현재 숫자'),('player','내 카드'),('dealer','상대 카드'),('opened','선택한 칸'),('board','보드')]:
   if k not in s:continue
   value=s[k]
@@ -170,6 +170,8 @@ async def start_game(i,game,bet,choice=None):
  await i.response.defer()
  r=await operation(i,'play',dict(game=game,bet=bet,choice=choice))
  await decorate_round(i,r)
+ if games.CATALOG[game][2]:
+  return await i.edit_original_response(embed=game_embed(r),view=game_view(r))
  game_motion.BUSY.add(str(r['id']))
  try:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
  finally:game_motion.BUSY.discard(str(r['id']))
@@ -388,3 +390,4 @@ async def main():
   await client.connect(reconnect=True)
 social_bot.register(client,tree,GUILD_ID)
 if __name__=='__main__':asyncio.run(main())
+

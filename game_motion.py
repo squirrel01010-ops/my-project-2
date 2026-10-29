@@ -44,6 +44,7 @@ def board(r):
 
 def sequence(r):
  game=r['game'];s=r.get('state',{})
+ if games.CATALOG[game][2] and 'previous_state' not in r:return []
  if game=='wheel':
   target=s.get('segment',0);positions=[(target-offset)%8 for offset in (19,16,13,10,7,5,3,1,0)]
   return [(wheel_board(index,s.get('wheelMultipliers')),delay) for index,delay in zip(positions,[.5,.6,.7,.8,1,1.2,1.4,1.7,2.1])]
@@ -103,7 +104,7 @@ def sequence(r):
 async def reveal(edit,r,final_embed,final_view):
  try:
   for frame,delay in sequence(r):
-   e=discord.Embed(title=('🎡 돌림판이 돌아가고 있어요…' if r['game']=='wheel' else games.CATALOG[r['game']][0]+' 진행 중…'),description=(f"👤 {r.get('display_name','참가자')} · 🪙 {r.get('bet',0):,} EXP\n\n"+frame),color=0xf1c40f if r['game'] in ('wheel','roulette') else 0x7289da)
+   e=discord.Embed(title=('🎡 돌림판이 돌아가고 있어요…' if r['game']=='wheel' else games.CATALOG[r['game']][0]),description=(f"👤 {r.get('display_name','참가자')} · 🪙 {r.get('bet',0):,} EXP\n\n"+frame),color=0xf1c40f if r['game'] in ('wheel','roulette') else 0x7289da)
    if r['game'] not in ('wheel','roulette'):
     e.title=games.CATALOG[r['game']][0];e.description=frame
     e.set_footer(text=f"{r.get('display_name','참가자')} · 베팅 {r.get('bet',0):,} EXP")
@@ -114,3 +115,4 @@ async def reveal(edit,r,final_embed,final_view):
   pass
  finally:
   await edit(embed=final_embed,view=final_view)
+

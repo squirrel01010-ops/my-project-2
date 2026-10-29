@@ -29,7 +29,7 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
 
  def test_custom_frames_end_on_the_real_result(self):
   for game,state in [('slots',{'symbols':[4,3,2]}),('scratch',{'symbols':[2,2,2]}),('blackjack',{'player':[1,10],'dealer':[9,10]}),('mines',{'opened':[1,2],'hazards':[0,3,4]}),('tower',{'step':3})]:
-   r={'game':game,'state':state,'status':'done'}
+   r={'game':game,'state':state,'status':'done','previous_state':{}}
    frames=game_motion.sequence(r)
    self.assertIn(game_motion.board(r),frames[-1][0])
    self.assertAlmostEqual(sum(delay for _,delay in frames),game_motion.DURATION[game])

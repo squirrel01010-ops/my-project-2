@@ -137,8 +137,15 @@ def cooldown(c,key,seconds,now=None):
 def validate_settings(value):
  s={**DEFAULTS,**value}
  for key in ('chatXP','cooldown','voiceXP','attendanceXP','streakBonus','streakCap','minBet','maxBet','gameCooldown','gameTimeout','levelBase','voiceMinMembers','dailyCap','rankingInterval','giftFee'):
-  integer(s[key],0,1000000)
- if not 1<=s['minBet']<=s['maxBet'] or s['levelBase']<1 or s['voiceMinMembers']<1 or s['gameTimeout']<60 or s['rankingInterval']<60 or s['giftFee']>30:raise ValueError('설정 범위를 확인하세요')
+  label={'chatXP':'채팅 경험치','cooldown':'채팅 쿨타임','voiceXP':'음성 경험치','attendanceXP':'출석 보상','streakBonus':'연속 출석 보상','streakCap':'출석 보상 누적 일수','minBet':'전체 최소 베팅','maxBet':'전체 최대 베팅','gameCooldown':'게임 쿨타임','gameTimeout':'게임 제한 시간','levelBase':'레벨 기준값','voiceMinMembers':'음성 최소 인원','dailyCap':'일일 한도','rankingInterval':'순위 갱신 간격','giftFee':'선물 수수료'}[key]
+  try:integer(s[key],0,1000000)
+  except ValueError:raise ValueError(f'{label}: 0~1,000,000 사이 정수를 입력하세요') from None
+ if not 1<=s['minBet']<=s['maxBet']:raise ValueError('전체 베팅 한도: 최소 베팅은 1 이상, 최대 베팅은 최소 베팅 이상이어야 합니다')
+ if s['levelBase']<1:raise ValueError('레벨 기준값은 1 이상이어야 합니다')
+ if s['voiceMinMembers']<1:raise ValueError('음성 최소 인원은 1 이상이어야 합니다')
+ if s['gameTimeout']<60:raise ValueError('게임 제한 시간은 60초 이상이어야 합니다')
+ if s['rankingInterval']<60:raise ValueError('순위 갱신 간격은 60초 이상이어야 합니다')
+ if s['giftFee']>30:raise ValueError('선물 수수료는 0~30%여야 합니다')
  for k in ('casino','voiceAllowMuted','voiceAllowDeafened','seasonResetXP'):
   if type(s[k]) is not bool:raise ValueError('켜기/끄기 값을 확인하세요')
  try:ZoneInfo(s['timezone'])
@@ -171,11 +178,14 @@ def validate_settings(value):
  for g in games.CATALOG:
   cfg=s['games'].get(g)
   if not isinstance(cfg,dict) or type(cfg.get('enabled')) is not bool:raise ValueError('게임 설정을 확인하세요')
-  integer(cfg.get('fee'),0,30);integer(cfg.get('minBet'),1);integer(cfg.get('maxBet'),1)
-  if cfg['maxBet']<cfg['minBet']:raise ValueError('게임 베팅 한도를 확인하세요')
+  name=games.CATALOG[g][0]
+  for key,label,lo,hi in [('fee','수수료',0,30),('minBet','최소 베팅',1,1000000),('maxBet','최대 베팅',1,1000000)]:
+   try:integer(cfg.get(key),lo,hi)
+   except ValueError:raise ValueError(f'{name} {label}: {lo:,}~{hi:,} 사이 정수를 입력하세요') from None
+  if cfg['maxBet']<cfg['minBet']:raise ValueError(f'{name}: 최대 베팅은 최소 베팅 이상이어야 합니다')
   for key,lo,hi in [('winChance',0,100),('winMultiplier',0,1000),('profitScale',0,100)]:
    v=cfg.get(key)
-   if v is not None and (type(v) not in (int,float) or not math.isfinite(v) or not lo<=v<=hi):raise ValueError('확률·배당 설정 범위를 확인하세요')
+   if v is not None and (type(v) not in (int,float) or not math.isfinite(v) or not lo<=v<=hi):raise ValueError(f"{name} { {'winChance':'당첨 확률','winMultiplier':'당첨 배당','profitScale':'승리 수익 배율'}[key]}: {lo}~{hi} 사이 숫자를 입력하세요")
   if g not in games.CONFIGURABLE_CHANCE and (cfg.get('winChance') is not None or cfg.get('winMultiplier') is not None):raise ValueError('이 게임은 승률 직접 설정을 지원하지 않습니다')
   if g=='wheel':
    for key,default,maximum in [('wheelWeights',[1]*8,1000000),('wheelMultipliers',[0,0,0,0,1,1,2,4],1000)]:
@@ -405,3 +415,4 @@ def desired_roles(uid):
   return want,managed,u,s
 
 init()
+

@@ -34,7 +34,7 @@ def embed(s):
    e.add_field(name=p['name'][:100],value=f'{cards}\n{line}',inline=False)
   e.set_footer(text='내 패는 [내 카드]에서만 비공개 확인 · 턴 초과 시 가능하면 체크, 아니면 폴드')
  elif kind=='lottery':
-  e.description=f"🎟 1장 **{s['price']:,} EXP** · 1인 최대 {s['max_tickets']}장\n추첨 <t:{int(s['draw_at'])}:F>\n상금 적립 {s['pot']+s['rollover']:,} EXP (이번 판매분 수수료 {s['fee']}%)"
+  e.description=f"🎟 1장 **{s['price']:,} EXP** · 1인 최대 {s['max_tickets']}장\n추첨 <t:{int(s['draw_at'])}:F>\n기본상금 **{s.get('base_prize',0):,} EXP**\n총 상금 **{s.get('base_prize',0)+s['pot']+s['rollover']:,} EXP** (이번 판매분 수수료 {s['fee']}%)"
   if s['status']=='done':e.add_field(name='당첨 번호',value=' · '.join(map(str,s['winning'])));e.add_field(name='결과',value=f"당첨권 {len(s['winners'])}장 · 지급 {s['paid']:,} EXP")
   e.set_footer(text='1~20 중 서로 다른 3개 · 모두 일치하면 당첨 · 당첨자가 없으면 이월')
  else:
@@ -44,7 +44,7 @@ def embed(s):
    status=f"✅ {p.get('at',0):.2f}배 · 반환 {p['payout']:,}" if p['status']=='cashed' else '💥 패배' if p['status']=='lost' else f"자동 {p['auto']/100:.2f}배" if p['auto'] else '수동 정산'
    lines.append(f"{p['name'][:30]} · {p['bet']:,} EXP · {status}")
   e.add_field(name=f"참가자 {len(s['players'])}명",value='\n'.join(lines)[:1024] or '모집 중',inline=False)
-  e.set_footer(text='자동 정산 배당을 정해 두면 목표 배당에서 자동으로 정산돼요.')
+  e.set_footer(text='화면 자동 갱신 · 목표 배당에서 자동 정산할 수 있어요.')
  return e
 
 def view(s):
@@ -57,7 +57,7 @@ def view(s):
  elif kind=='crash':
   if s['status']=='lobby':controls=[('참가','join')]
   elif s['status']=='flying':controls=[('지금 정산','cashout')]
- controls.append(('새로고침','refresh'))
+ if kind!='crash':controls.append(('새로고침','refresh'))
  for label,action in controls:v.add_item(discord.ui.Button(label=label,custom_id=f"social:{kind}:{rid}:{action}:{s.get('revision',0)}",style=discord.ButtonStyle.primary if action in ('cashout','join','auto') else discord.ButtonStyle.secondary))
  return v
 
@@ -95,7 +95,7 @@ class InputModal(discord.ui.Modal):
    else:
     value=float(self.auto.value);cents=round(value*100)
     s=await op(i,'crash/join',dict(round=self.rid,bet=int(self.amount.value),auto=cents))
-   await i.followup.send('반영했습니다. 테이블에서 새로고침하면 확인할 수 있어요.',ephemeral=True)
+   await i.followup.send('반영했어요. 게임 화면에 자동으로 표시돼요.',ephemeral=True)
   except (ValueError,PermissionError,OverflowError) as e:await i.followup.send(str(e),ephemeral=True)
 
 async def handle(i):
@@ -123,26 +123,31 @@ async def handle(i):
  except (ValueError,PermissionError) as e:await i.followup.send(str(e),ephemeral=True)
  return True
 
-@tasks.loop(seconds=3)
+async def refresh_live_message(row):
+ s=json.loads(row['state']);public=social.public(s);finger='auto-display-v3:'+json.dumps(public,sort_keys=True)
+ key='live-view:'+row['id']
+ with core.db() as c:old=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
+ if old and old[0]==finger:return
+ try:
+  ch=CLIENT.get_channel(int(row['channel']))
+  if ch is None:ch=await CLIENT.fetch_channel(int(row['channel']))
+  await ch.get_partial_message(int(row['message'])).edit(embed=embed(public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
+ except discord.NotFound:
+  with core.db(True) as c:c.execute('UPDATE live_games SET message=NULL WHERE id=?',(row['id'],))
+  return
+ except discord.HTTPException:return
+ with core.db(True) as c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,finger))
+
+@tasks.loop(seconds=2)
 async def live_updates():
  if not CLIENT or not CLIENT.is_ready():return
  try:
   await asyncio.to_thread(core.maintenance)
-  with core.db() as c:rows=c.execute("SELECT * FROM live_games WHERE message IS NOT NULL AND (status IN ('lobby','active','open','flying') OR created>?) ORDER BY created DESC LIMIT 40",(time.time()-86400,)).fetchall()
+  with core.db() as c:rows=c.execute("SELECT * FROM live_games WHERE message IS NOT NULL AND (status IN ('lobby','active','open','flying') OR created>?) ORDER BY CASE WHEN status IN ('lobby','active','open','flying') THEN 0 ELSE 1 END,created DESC LIMIT 100",(time.time()-86400,)).fetchall()
   for row in rows:
-   s=json.loads(row['state']);public=social.public(s);finger='display-v2:'+json.dumps(public,sort_keys=True)
-   # Lotteries/tables only edit on changes; crash display updates every 3s.
-   key='live-view:'+row['id']
-   with core.db() as c:old=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
-   if old and old[0]==finger:continue
-   ch=CLIENT.get_channel(int(row['channel']))
-   if not ch:continue
-   try:await ch.get_partial_message(int(row['message'])).edit(embed=embed(public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
-   except discord.NotFound:
-    with core.db(True) as c:c.execute('UPDATE live_games SET message=NULL WHERE id=?',(row['id'],))
-    continue
-   except discord.HTTPException:continue
-   with core.db(True) as c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,finger))
+   try:await refresh_live_message(row)
+   except Exception as e:
+    with core.db(True) as c:core.audit(c,'bot','live-game-error',dict(type=type(e).__name__))
  except Exception as e:
   with core.db(True) as c:core.audit(c,'bot','live-game-error',dict(type=type(e).__name__))
 
@@ -184,3 +189,4 @@ def register(client,tree,guild_id):
   with core.db() as c:r=c.execute("SELECT id FROM live_games WHERE kind='crash' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone()
   if not r:return await i.followup.send('이 채널에는 크래시 기록이 없어요.',ephemeral=True)
   await publish(i,await asyncio.to_thread(social.read,'crash',r['id']))
+

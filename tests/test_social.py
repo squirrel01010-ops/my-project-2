@@ -82,8 +82,8 @@ class SocialTransactions(unittest.TestCase):
   self.op('222','lottery/buy',dict(draw=d['id'],numbers=[1,2,3]));self.op('333','lottery/buy',dict(draw=d['id'],numbers=[4,5,6]))
   raw=self.raw(d['id'],'lottery');raw['draw_at']=1;self.setraw(raw)
   with patch('secrets.SystemRandom.sample',return_value=[1,2,3]):core.maintenance()
-  done=social.read('lottery',d['id']);self.assertEqual(done['paid'],300);self.assertEqual(self.xp('111'),10050);self.assertEqual(self.xp('222'),10050);self.assertEqual(self.xp('333'),9900)
-  core.maintenance();self.assertEqual(self.xp('111'),10050)
+  done=social.read('lottery',d['id']);self.assertEqual(done['paid'],200300);self.assertEqual(self.xp('111'),110050);self.assertEqual(self.xp('222'),110050);self.assertEqual(self.xp('333'),9900)
+  core.maintenance();self.assertEqual(self.xp('111'),110050)
  def test_lottery_limit_invalid_and_stale_draw(self):
   core.maintenance();d=social.read('lottery')
   with self.assertRaises(ValueError):self.op('111','lottery/buy',dict(draw=d['id'],numbers=[1,1,2]))
@@ -94,7 +94,16 @@ class SocialTransactions(unittest.TestCase):
  def test_lottery_rollover(self):
   core.maintenance();d=social.read('lottery');self.op('111','lottery/buy',dict(draw=d['id'],numbers=[1,2,3]));raw=self.raw(d['id'],'lottery');raw['draw_at']=1;self.setraw(raw)
   with patch('secrets.SystemRandom.sample',return_value=[4,5,6]):core.maintenance()
-  self.assertEqual(social.read('lottery')['rollover'],100)
+  self.assertEqual(social.read('lottery')['rollover'],200100)
+ def test_base_prize_is_added_once_and_legacy_open_draw_is_upgraded(self):
+  core.maintenance();d=social.read('lottery');self.assertEqual(d['base_prize'],200000)
+  raw=self.raw(d['id'],'lottery');raw.pop('base_prize');raw['pot']=1000;raw['rollover']=500;self.setraw(raw)
+  core.maintenance();core.maintenance();d=social.read('lottery')
+  self.assertEqual(d['base_prize'],200000);self.assertEqual(d['pot'],1000);self.assertEqual(d['rollover'],500)
+ def test_base_prize_is_not_charged_sales_fee(self):
+  core.maintenance();d=social.read('lottery');raw=self.raw(d['id'],'lottery');raw.update(pot=1000,rollover=500,fee=30,draw_at=1);self.setraw(raw)
+  core.maintenance();done=social.read('lottery',d['id'])
+  self.assertEqual(done['paid']+self.raw(d['id'],'lottery')['carry'],201200)
  def crash(self,auto=200):return self.op('111','crash/join',dict(bet=100,auto=auto))
  def test_crash_hidden_seed_and_automatic_after_restart(self):
   s=self.crash();self.assertNotIn('seed',s);self.assertNotIn('crash',s);r=self.raw(s['id'],'crash');r['starts']=time.time()-20;r['crash']=300;self.setraw(r);core.init();core.maintenance()

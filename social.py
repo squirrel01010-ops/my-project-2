@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import poker
 
 DEFAULTS=dict(holdemEnabled=True,holdemMinBuyin=100,holdemMaxBuyin=10000,holdemLobby=120,holdemTurn=45,
- lotteryEnabled=True,lotteryPrice=100,lotteryHour=21,lotteryMaxTickets=20,lotteryFee=0,
+ lotteryEnabled=True,lotteryBasePrize=200000,lotteryPrice=100,lotteryHour=21,lotteryMaxTickets=20,lotteryFee=0,
  crashEnabled=True,crashLobby=20,crashMinBet=10,crashMaxBet=10000)
 CATALOG={
  'holdem':dict(name='텍사스 홀덤',rules='2~6인 · 한 핸드 · 노리밋 · 사이드팟 지원 · 테이블 칩을 먼저 예치하고 종료 후 반환',symbol='♠'),
@@ -32,6 +32,7 @@ def validate(s):
  for k in ('holdemMinBuyin','holdemMaxBuyin','lotteryPrice','crashMinBet','crashMaxBet'):integer(out[k],1,1000000)
  for low,high in [('holdemMinBuyin','holdemMaxBuyin'),('crashMinBet','crashMaxBet')]:
   if out[low]>out[high]:raise ValueError('게임 금액 범위를 확인하세요')
+ integer(out['lotteryBasePrize'],0,1000000000)
  integer(out['holdemLobby'],15,600);integer(out['holdemTurn'],15,180);integer(out['lotteryHour'],0,23);integer(out['lotteryMaxTickets'],1,100);integer(out['lotteryFee'],0,30);integer(out['crashLobby'],10,120)
  return out
 
@@ -46,7 +47,7 @@ def load(c,rid,kind):
 
 def public(s,viewer=None,now=None):
  if s['kind']=='holdem':return dict(kind='holdem',**poker.view(s,viewer))
- if s['kind']=='lottery':return {k:s[k] for k in ('id','kind','status','created','draw_at','price','max_tickets','fee','pot','rollover','winning','winners','paid','channel') if k in s}
+ if s['kind']=='lottery':return {k:s[k] for k in ('id','kind','status','created','draw_at','price','base_prize','max_tickets','fee','pot','rollover','winning','winners','paid','channel') if k in s}
  out={k:s[k] for k in ('id','kind','status','created','starts','channel','commitment','max_bet','min_bet')}
  out['players']=[{k:p[k] for k in ('uid','name','bet','auto','status','payout','at') if k in p} for p in s['players']]
  out['multiplier']=min(s['crash']/100,multiplier(s,now or time.time())) if s['status']!='lobby' else 1
@@ -66,17 +67,21 @@ def next_draw(s,now):
 
 def ensure_draw(c,s,now):
  r=c.execute("SELECT state FROM live_games WHERE kind='lottery' AND status='open' LIMIT 1").fetchone()
- if r:return json.loads(r[0])
+ if r:
+  current=json.loads(r[0])
+  if 'base_prize' not in current:
+   current['base_prize']=config(s)['lotteryBasePrize'];save(c,current)
+  return current
  cfg=config(s)
  if not cfg['lotteryEnabled']:return None
  prev=c.execute("SELECT state FROM live_games WHERE kind='lottery' AND status='done' ORDER BY created DESC LIMIT 1").fetchone();rollover=json.loads(prev[0]).get('carry',0) if prev else 0
- d=dict(id=secrets.token_hex(12),kind='lottery',status='open',created=now,draw_at=next_draw(s,now),price=cfg['lotteryPrice'],max_tickets=cfg['lotteryMaxTickets'],fee=cfg['lotteryFee'],pot=0,rollover=rollover,channel=s['rankingChannel'])
+ d=dict(id=secrets.token_hex(12),kind='lottery',status='open',created=now,draw_at=next_draw(s,now),price=cfg['lotteryPrice'],base_prize=cfg['lotteryBasePrize'],max_tickets=cfg['lotteryMaxTickets'],fee=cfg['lotteryFee'],pot=0,rollover=rollover,channel=s['rankingChannel'])
  save(c,d);return d
 
 def draw(c,s,now):
  from core import adjust,job
  winning=sorted(secrets.SystemRandom().sample(range(1,21),3));tickets=c.execute('SELECT * FROM lottery_tickets WHERE draw=? ORDER BY id',(s['id'],)).fetchall()
- winners=[t for t in tickets if json.loads(t['numbers'])==winning];pool=s['rollover']+s['pot']-s['pot']*s['fee']//100
+ winners=[t for t in tickets if json.loads(t['numbers'])==winning];pool=s.get('base_prize',200000)+s['rollover']+s['pot']-s['pot']*s['fee']//100
  s.update(winning=winning,winners=[],paid=0,carry=pool,status='done')
  if winners:
   share,odd=divmod(pool,len(winners))
@@ -239,3 +244,4 @@ def read(kind,rid=None,viewer=None):
    if not r:return None
    s=json.loads(r[0])
   return public(s,viewer)
+
