@@ -11,6 +11,11 @@ import social
 CLIENT=None
 GUILD_ID=0
 
+async def database(fn,write=False):
+ def run():
+  with core.db(write) as c:return fn(c)
+ return await asyncio.to_thread(run)
+
 def context(i):return dict(name=i.user.display_name,roles=[str(r.id) for r in getattr(i.user,'roles',[])],channel=str(i.channel_id))
 async def op(i,path,b):
  if i.guild_id!=GUILD_ID:raise ValueError('지정된 서버에서 사용하세요')
@@ -69,23 +74,23 @@ def view(s):
  return v
 
 async def bind_message(s,message):
- with core.db(True) as c:c.execute('UPDATE live_games SET channel=?,message=? WHERE id=?',(str(message.channel.id),str(message.id),s['id']))
+ await database(lambda c:c.execute('UPDATE live_games SET channel=?,message=? WHERE id=?',(str(message.channel.id),str(message.id),s['id'])).rowcount,True)
 
 async def publish(i,s):
  # Always rebuild a public snapshot: operation results may contain the caller's hole cards.
  public=await asyncio.to_thread(social.read,s['kind'],s['id'])
- with core.db() as c:existing=c.execute('SELECT channel,message FROM live_games WHERE id=?',(s['id'],)).fetchone()
+ existing=await database(lambda c:c.execute('SELECT channel,message FROM live_games WHERE id=?',(s['id'],)).fetchone())
  if existing and existing['message'] and existing['channel']==str(i.channel_id):
   try:
    msg=i.channel.get_partial_message(int(existing['message']))
-   await msg.edit(embed=embed(public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
+   await msg.edit(embed=await asyncio.to_thread(embed,public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
    await i.followup.send('진행 화면: '+msg.jump_url,ephemeral=True);return
   except discord.NotFound:pass
- msg=await i.followup.send(embed=embed(public),view=view(public),wait=True,allowed_mentions=discord.AllowedMentions.none());await bind_message(public,msg)
+ msg=await i.followup.send(embed=await asyncio.to_thread(embed,public),view=view(public),wait=True,allowed_mentions=discord.AllowedMentions.none());await bind_message(public,msg)
 
 async def update_message(i,s):
  public=await asyncio.to_thread(social.read,s['kind'],s['id'])
- await i.edit_original_response(embed=embed(public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
+ await i.edit_original_response(embed=await asyncio.to_thread(embed,public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
 
 class InputModal(discord.ui.Modal):
  def __init__(self,kind,rid,action,revision):
@@ -118,11 +123,11 @@ async def handle(i):
    s=await asyncio.to_thread(social.read,kind,rid,str(i.user.id));p=next((p for p in s['players'] if p['uid']==str(i.user.id)),None)
    await i.followup.send('내 카드: '+' '.join(p['cards']) if p else '이 테이블의 참가자가 아닙니다.',ephemeral=True);return True
   if action=='tickets':
-   with core.db() as c:
-    rows=c.execute('SELECT numbers,payout,price FROM lottery_tickets WHERE draw=? AND uid=?',(rid,str(i.user.id))).fetchall()
-    draw=c.execute("SELECT state FROM live_games WHERE id=? AND kind='lottery'",(rid,)).fetchone()
+   def tickets(c):
+    return (c.execute('SELECT numbers,payout,price FROM lottery_tickets WHERE draw=? AND uid=?',(rid,str(i.user.id))).fetchall(),c.execute("SELECT state FROM live_games WHERE id=? AND kind='lottery'",(rid,)).fetchone())
+   rows,draw=await database(tickets)
    fee=json.loads(draw[0]).get('fee',0) if draw else 0
-   await i.followup.send(('\n'.join(f"{r['numbers']} · {profit_text(r['payout']-r['price'],fee)}" for r in rows)[:1700] or '구매한 복권이 없어요.')+'\n'+balance_text(str(i.user.id)),ephemeral=True);return True
+   await i.followup.send(('\n'.join(f"{r['numbers']} · {profit_text(r['payout']-r['price'],fee)}" for r in rows)[:1700] or '구매한 복권이 없어요.')+'\n'+await asyncio.to_thread(balance_text,str(i.user.id)),ephemeral=True);return True
   if kind=='lottery' and action=='auto':
    r=await op(i,'lottery/buy',dict(draw=rid));await i.followup.send('구매 번호: '+str(r['tickets'][0]['numbers']),ephemeral=True);return True
   if action=='refresh':s=await asyncio.to_thread(social.read,kind,rid)
@@ -138,29 +143,29 @@ async def live_updates():
  if not CLIENT or not CLIENT.is_ready():return
  try:
   await asyncio.to_thread(core.maintenance)
-  with core.db() as c:rows=c.execute("SELECT * FROM live_games WHERE message IS NOT NULL AND (status IN ('lobby','active','open','flying') OR created>?) ORDER BY created DESC LIMIT 40",(time.time()-86400,)).fetchall()
+  rows=await database(lambda c:c.execute("SELECT * FROM live_games WHERE message IS NOT NULL AND (status IN ('lobby','active','open','flying') OR created>?) ORDER BY created DESC LIMIT 40",(time.time()-86400,)).fetchall())
   for row in rows:
    s=json.loads(row['state']);public=social.public(s);finger='display-v2:'+json.dumps(public,sort_keys=True)
    # Lotteries/tables only edit on changes; crash display updates every 3s.
    key='live-view:'+row['id']
-   with core.db() as c:old=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
+   old=await database(lambda c:c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone())
    if old and old[0]==finger:continue
    ch=CLIENT.get_channel(int(row['channel']))
    if not ch:continue
-   try:await ch.get_partial_message(int(row['message'])).edit(embed=embed(public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
+   try:await ch.get_partial_message(int(row['message'])).edit(embed=await asyncio.to_thread(embed,public),view=view(public),allowed_mentions=discord.AllowedMentions.none())
    except discord.NotFound:
-    with core.db(True) as c:c.execute('UPDATE live_games SET message=NULL WHERE id=?',(row['id'],))
+    await database(lambda c:c.execute('UPDATE live_games SET message=NULL WHERE id=?',(row['id'],)).rowcount,True)
     continue
    except discord.HTTPException:continue
-   with core.db(True) as c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,finger))
+   await database(lambda c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,finger)).rowcount,True)
  except Exception as e:
-  with core.db(True) as c:core.audit(c,'bot','live-game-error',dict(type=type(e).__name__))
+  await database(lambda c:core.audit(c,'bot','live-game-error',dict(type=type(e).__name__)),True)
 
 async def announce(guild,p):
  if not p.get('channel'):return
  ch=guild.get_channel_or_thread(int(p['channel']))
  if ch:
-  s=await asyncio.to_thread(social.read,p['kind'],p['id']);await ch.send(embed=embed(s),view=view(s),allowed_mentions=discord.AllowedMentions.none())
+  s=await asyncio.to_thread(social.read,p['kind'],p['id']);await ch.send(embed=await asyncio.to_thread(embed,s),view=view(s),allowed_mentions=discord.AllowedMentions.none())
 
 def register(client,tree,guild_id):
  global CLIENT,GUILD_ID
@@ -173,7 +178,7 @@ def register(client,tree,guild_id):
   if i.guild_id!=GUILD_ID:raise ValueError('지정 서버에서 사용하세요')
   await i.response.defer()
   if not 테이블:
-   with core.db() as c:row=c.execute("SELECT id FROM live_games WHERE kind='holdem' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone()
+   row=await database(lambda c:c.execute("SELECT id FROM live_games WHERE kind='holdem' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone())
    if not row:return await i.followup.send('이 채널에는 홀덤 테이블이 없어요.',ephemeral=True)
    테이블=row['id']
   s=await asyncio.to_thread(social.read,'holdem',테이블)
@@ -191,6 +196,6 @@ def register(client,tree,guild_id):
  async def crash_show(i:discord.Interaction):
   if i.guild_id!=GUILD_ID:raise ValueError('지정 서버에서 사용하세요')
   await i.response.defer()
-  with core.db() as c:r=c.execute("SELECT id FROM live_games WHERE kind='crash' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone()
+  r=await database(lambda c:c.execute("SELECT id FROM live_games WHERE kind='crash' AND channel=? ORDER BY created DESC LIMIT 1",(str(i.channel_id),)).fetchone())
   if not r:return await i.followup.send('이 채널에는 크래시 기록이 없어요.',ephemeral=True)
   await publish(i,await asyncio.to_thread(social.read,'crash',r['id']))

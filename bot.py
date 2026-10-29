@@ -24,6 +24,12 @@ voice_candidates=set()
 GAME_ICONS=dict(baccarat='🃏',coin='🪙',dice='🎲',baskin='🍦',scratch='🎟️',slots='🎰',wheel='🎡',mines='💎',highlow='🃏',blackjack='♠️',roulette='🔴',indian='🪶',ttt='⭕',bomb='💣',tower='🗼',horse='🏇')
 commands_synced=False
 
+async def database(fn,write=False):
+ # SQLite may wait up to 15 seconds for a lock; never wait on the gateway loop.
+ def run():
+  with core.db(write) as c:return fn(c)
+ return await asyncio.to_thread(run)
+
 def command_status(**values):
  with core.db(True) as c:
   if 'request' not in values:
@@ -36,16 +42,14 @@ def command_status(**values):
 async def sync_commands():
  global commands_synced
  if not client.is_ready():return
- with core.db() as c:
-  row=c.execute("SELECT value FROM meta WHERE key='command_sync_request'").fetchone()
-  previous=c.execute("SELECT value FROM meta WHERE key='command_sync'").fetchone()
+ row,previous=await database(lambda c:(c.execute("SELECT value FROM meta WHERE key='command_sync_request'").fetchone(),c.execute("SELECT value FROM meta WHERE key='command_sync'").fetchone()))
  request=row[0] if row else ''
  status=json.loads(previous[0]) if previous else {}
  if commands_synced and status.get('state')=='synced' and status.get('request')==request:return
  if not client.get_guild(GUILD_ID):
-  command_status(state='error',request=request,count=0,message='설정된 서버에 봇이 없습니다. 서버 ID와 봇 초대를 확인하세요.')
+  await asyncio.to_thread(command_status,state='error',request=request,count=0,message='설정된 서버에 봇이 없습니다. 서버 ID와 봇 초대를 확인하세요.')
   return
- command_status(state='syncing',request=request,count=0,message='서버 명령어를 등록하고 있어요.')
+ await asyncio.to_thread(command_status,state='syncing',request=request,count=0,message='서버 명령어를 등록하고 있어요.')
  try:
   guild=discord.Object(id=GUILD_ID)
   tree.copy_global_to(guild=guild)
@@ -53,16 +57,16 @@ async def sync_commands():
   expected={c.name for c in tree.get_commands(guild=guild)}
   if {c.name for c in registered}!=expected:raise ValueError('명령어 등록 결과가 일치하지 않습니다')
  except discord.Forbidden:
-  command_status(state='error',request=request,count=0,message='명령어 등록 권한이 없습니다. 아래 봇 연결 버튼으로 같은 서버에 다시 승인하세요.')
+  await asyncio.to_thread(command_status,state='error',request=request,count=0,message='명령어 등록 권한이 없습니다. 아래 봇 연결 버튼으로 같은 서버에 다시 승인하세요.')
  except Exception as error:
-  command_status(state='error',request=request,count=0,message='명령어 등록에 실패했습니다. 1분 뒤 자동 재시도합니다. ('+type(error).__name__+')')
+  await asyncio.to_thread(command_status,state='error',request=request,count=0,message='명령어 등록에 실패했습니다. 1분 뒤 자동 재시도합니다. ('+type(error).__name__+')')
  else:
   commands_synced=True
-  command_status(state='synced',request=request,count=len(registered),names=sorted(expected),message='서버 명령어 등록 완료')
+  await asyncio.to_thread(command_status,state='synced',request=request,count=len(registered),names=sorted(expected),message='서버 명령어 등록 완료')
   print(f'STELLAR 명령어 {len(registered)}개 등록 완료 · 서버 {GUILD_ID}',flush=True)
 
 async def settings():
- with core.db() as c:return core.settings(c)
+ return await database(core.settings)
 
 def context(i):return dict(name=i.user.display_name,roles=[str(r.id) for r in getattr(i.user,'roles',[])],channel=str(i.channel_id))
 async def operation(i,path,body):
@@ -119,8 +123,8 @@ async def on_interaction(i):
    previous=await asyncio.to_thread(previous_state)
    r=await operation(i,'game/action',dict(round=rid,revision=int(rev),action=act,value=int(value) if value else None))
    r['previous_state']=previous
-   if act=='cashout':await i.edit_original_response(embed=game_embed(r),view=game_view(r))
-   else:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
+   if act=='cashout':await i.edit_original_response(embed=await asyncio.to_thread(game_embed,r),view=game_view(r))
+   else:await game_motion.reveal(i.edit_original_response,r,await asyncio.to_thread(game_embed,r),game_view(r))
   finally:game_motion.BUSY.discard(rid)
  except (ValueError,PermissionError) as e:await i.followup.send(str(e),ephemeral=True)
 
@@ -133,9 +137,12 @@ async def attendance(i:discord.Interaction):
 @tree.command(name='내정보',description='현재 띵조코인와 레벨을 확인해요')
 async def profile(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
- with core.db(True) as c:core.ensure(c,str(i.user.id),i.user.display_name);u=core.user(c,str(i.user.id))
+ await i.response.defer(ephemeral=True)
+ def read(c):
+  core.ensure(c,str(i.user.id),i.user.display_name);return core.user(c,str(i.user.id))
+ u=await database(read,True)
  e=discord.Embed(title=i.user.display_name,color=0x9d85ff,description=f"Lv. **{u['level']}** · **{u['xp']:,} 띵조코인**\n다음 레벨까지 {u['nextXP']-u['xp']:,} 띵조코인")
- await i.response.send_message(embed=e,ephemeral=True)
+ await i.followup.send(embed=e,ephemeral=True)
 
 @tree.command(name='랭킹',description='서버 띵조코인 상위 10명을 확인해요')
 async def ranking(i:discord.Interaction):
@@ -153,9 +160,9 @@ async def start_game(i,game,bet,choice=None):
  await i.response.defer()
  r=await operation(i,'play',dict(game=game,bet=bet,choice=choice))
  if game in ('blackjack','indian','highlow'):r['previous_state']={}
- elif games.CATALOG[game][2]:return await i.edit_original_response(embed=game_embed(r),view=game_view(r))
+ elif games.CATALOG[game][2]:return await i.edit_original_response(embed=await asyncio.to_thread(game_embed,r),view=game_view(r))
  game_motion.BUSY.add(str(r['id']))
- try:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
+ try:await game_motion.reveal(i.edit_original_response,r,await asyncio.to_thread(game_embed,r),game_view(r))
  finally:game_motion.BUSY.discard(str(r['id']))
 
 @tree.command(name='게임',description='게임별 명령어와 이용 방법을 확인해요')
@@ -210,9 +217,10 @@ for game,name in SIMPLE_GAMES.items():register_game_command(game,name)
 @tree.command(name='이어하기',description='진행 중인 게임의 버튼을 다시 불러와요')
 async def resume(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
+ await i.response.defer()
  r=await asyncio.to_thread(core.resume_game,str(i.user.id))
- if not r:return await i.response.send_message('진행 중인 게임이 없어요',ephemeral=True)
- await i.response.send_message(embed=game_embed(r),view=game_view(r))
+ if not r:return await i.followup.send('진행 중인 게임이 없어요',ephemeral=True)
+ await i.followup.send(embed=await asyncio.to_thread(game_embed,r),view=game_view(r))
 
 @tree.command(name='상점',description='구매 가능한 상품을 페이지별로 확인해요')
 async def shop(i:discord.Interaction,페이지:app_commands.Range[int,1]=1):
@@ -222,7 +230,7 @@ async def shop(i:discord.Interaction,페이지:app_commands.Range[int,1]=1):
  text='\n'.join(f"`#{p['id']}` {p['name'][:100]} · {p['price']:,} 띵조코인"+(' · 보유 중' if p['kind']=='role' and p['owned'] else ' · 품절' if p['stock']==0 or p['kind']=='code' and p['codes']==0 else '') for p in result['products']) or '상품이 없어요'
  e=discord.Embed(title=f"상점 · {result['page']}/{result['pages']} 페이지",description=text+'\n`/구매 상품번호`로 구매하세요',color=0x9d85ff)
  view=discord.ui.View(timeout=120)
- for label,number in [('← 이전',페이지-1),('다음 →',페이지+1)]:
+ for label,number in [('← 이전',result['page']-1),('다음 →',result['page']+1)]:
   button=discord.ui.Button(label=label,disabled=number<1 or number>result['pages'])
   async def turn(interaction,page=number):await shop.callback(interaction,page)
   button.callback=turn;view.add_item(button)
@@ -240,7 +248,7 @@ async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,�
  member=await i.guild.fetch_member(i.user.id)
  roles=await i.guild.fetch_roles()
  owned={r.id for r in member.roles}
- with core.db() as c:configured=set(core.settings(c)['adminRoles'])
+ configured=set((await settings())['adminRoles'])
  if i.user.id!=i.guild.owner_id and not configured.intersection(map(str,owned)) and not any(r.id in owned and r.permissions.administrator for r in roles):raise PermissionError('설정된 관리자 역할 또는 Discord 관리자 권한이 필요합니다')
  if 대상.bot:raise ValueError('봇의 띵조코인은 변경할 수 없습니다')
  if 작업 not in ('give','take','set'):raise ValueError('잘못된 작업입니다')
@@ -297,17 +305,17 @@ async def sync_roles(guild,uid):
  if add:await member.add_roles(*add,reason='STELLAR 보상 동기화')
  if remove:await member.remove_roles(*remove,reason='STELLAR 레벨/기간 변경')
  key='nick:'+uid
- with core.db() as c:row=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
+ row=await database(lambda c:c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone())
  old=json.loads(row[0]) if row else None
  if s['nicknameFormat']:
   base=old['base'] if old and member.nick==old['last'] else member.nick
   nick=s['nicknameFormat'].replace('{name}',base or member.name).replace('{level}',str(u['level']))[:32]
   if nick!=member.nick:
    await member.edit(nick=nick,reason='STELLAR 레벨 표시')
-   with core.db(True) as c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(dict(base=base,last=nick))))
+   await database(lambda c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(dict(base=base,last=nick)))).rowcount,True)
  elif old:
   if member.nick==old['last']:await member.edit(nick=old['base'],reason='STELLAR 레벨 표시 해제')
-  with core.db(True) as c:c.execute('DELETE FROM meta WHERE key=?',(key,))
+  await database(lambda c:c.execute('DELETE FROM meta WHERE key=?',(key,)).rowcount,True)
 
 async def send_channel(guild,channel,text,s):
  if not channel:return
@@ -316,25 +324,24 @@ async def send_channel(guild,channel,text,s):
  await ch.send(embed=discord.Embed(description=text[:4000],color=int(s['embedColor'][1:],16)),allowed_mentions=discord.AllowedMentions.none())
 
 async def process_jobs(guild):
- with core.db() as c:jobs=c.execute("SELECT * FROM jobs WHERE status='pending' ORDER BY id LIMIT 40").fetchall()
+ jobs=await database(lambda c:c.execute("SELECT * FROM jobs WHERE status='pending' ORDER BY id LIMIT 40").fetchall())
  s=await settings()
  for j in jobs:
-  with core.db(True) as c:
-   if not c.execute("UPDATE jobs SET status='processing' WHERE id=? AND status='pending'",(j['id'],)).rowcount:continue
+  if not await database(lambda c:c.execute("UPDATE jobs SET status='processing' WHERE id=? AND status='pending'",(j['id'],)).rowcount,True):continue
   status='done';error=''
   try:
    p=json.loads(j['payload'])
    if j['kind']=='roles':await sync_roles(guild,p['uid'])
    elif j['kind']=='all_roles':
-    with core.db() as c:uids=[r[0] for r in c.execute('SELECT id FROM users')]
-    # Expand into individual retryable jobs so one bad role never blocks all members.
-    with core.db(True) as c:
-     for uid in uids:core.job(c,'roles',dict(uid=uid))
+    # Expand atomically without blocking message reception on the gateway.
+    def expand(c):
+     for row in c.execute('SELECT id FROM users').fetchall():core.job(c,'roles',dict(uid=row[0]))
+    await database(expand,True)
    elif j['kind']=='level':
     member=guild.get_member(int(p['uid']));text=s['levelMessage'].replace('{user}',member.display_name if member else p['uid']).replace('{level}',str(p['level']))
     await send_channel(guild,s['levelChannel'],text,s)
    elif j['kind']=='purchase':
-    with core.db() as c:o=c.execute('SELECT * FROM orders WHERE id=?',(p['order'],)).fetchone()
+    o=await database(lambda c:c.execute('SELECT * FROM orders WHERE id=?',(p['order'],)).fetchone())
     member=guild.get_member(int(p['uid']))
     if not o:raise ValueError('구매 내역을 찾을 수 없습니다')
     if member is None:member=await guild.fetch_member(int(p['uid']))
@@ -345,12 +352,12 @@ async def process_jobs(guild):
    elif j['kind']=='test':await send_channel(guild,p['channel'],'STELLAR 알림 테스트 · 연결이 정상입니다.',s)
   except (discord.HTTPException,ValueError) as e:status='failed';error=('Discord 권한/요청 오류: '+str(getattr(e,'status',''))) if isinstance(e,discord.HTTPException) else str(e)
   except Exception as e:status='failed';error='처리 오류: '+type(e).__name__
-  with core.db(True) as c:c.execute('UPDATE jobs SET status=?,error=? WHERE id=?',(status,error[:500],j['id']))
+  await database(lambda c:c.execute('UPDATE jobs SET status=?,error=? WHERE id=?',(status,error[:500],j['id'])).rowcount,True)
 
 async def update_ranking(guild):
  s=await settings()
  if not s['rankingChannel']:return
- with core.db() as c:r=c.execute("SELECT value FROM meta WHERE key='ranking'").fetchone()
+ r=await database(lambda c:c.execute("SELECT value FROM meta WHERE key='ranking'").fetchone())
  old=json.loads(r[0]) if r else {}
  if time.time()-old.get('time',0)<s['rankingInterval'] and old.get('channel')==s['rankingChannel']:return
  d=await asyncio.to_thread(core.leaderboard);text='\n'.join(f"{i+1}. {u['name']} · Lv.{u['level']} · {u['xp']:,} 띵조코인" for i,u in enumerate(d['users'][:20])) or '아직 활동 기록이 없어요'
@@ -361,7 +368,7 @@ async def update_ranking(guild):
   try:msg=await ch.fetch_message(int(old['id']));await msg.edit(embed=embed)
   except discord.NotFound:pass
  if not msg:msg=await ch.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
- with core.db(True) as c:c.execute("INSERT INTO meta VALUES('ranking',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(json.dumps(dict(id=msg.id,channel=s['rankingChannel'],time=time.time())),))
+ await database(lambda c:c.execute("INSERT INTO meta VALUES('ranking',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(json.dumps(dict(id=msg.id,channel=s['rankingChannel'],time=time.time())),)).rowcount,True)
 
 @tasks.loop(seconds=15)
 async def worker():
@@ -373,7 +380,7 @@ async def worker():
   await process_jobs(guild)
   await update_ranking(guild)
  except Exception as e:
-  with core.db(True) as c:core.audit(c,'bot','worker-error',dict(type=type(e).__name__))
+  await database(lambda c:core.audit(c,'bot','worker-error',dict(type=type(e).__name__)),True)
 
 
 @tasks.loop(seconds=15)
@@ -408,7 +415,7 @@ async def voice_tick():
 
 @tasks.loop(minutes=5)
 async def reconcile():
- with core.db(True) as c:core.job(c,'all_roles',{})
+ await database(lambda c:core.job(c,'all_roles',{}),True)
 
 @client.event
 async def on_ready():
@@ -431,13 +438,16 @@ async def main():
    await client.connect(reconnect=True)
  except discord.PrivilegedIntentsRequired:
   message='Discord 개발자 포털의 Bot 설정에서 Server Members Intent를 켜고 봇을 재시작하세요.'
-  command_status(state='error',count=0,message=message)
+  await asyncio.to_thread(command_status,state='error',count=0,message=message)
   raise SystemExit(message)
  except discord.LoginFailure:
   message='봇 로그인에 실패했습니다. 호스팅의 DISCORD_TOKEN을 확인하세요.'
-  command_status(state='error',count=0,message=message)
+  await asyncio.to_thread(command_status,state='error',count=0,message=message)
   raise SystemExit(message)
 social_bot.register(client,tree,GUILD_ID)
+# A temporary database lock must not permanently stop rewards or liveness tasks.
+for background in (sync_commands,heartbeat_tick,chat_recovery,worker,voice_tick,reconcile,social_bot.live_updates):
+ background.add_exception_type(sqlite3.OperationalError)
 for command in tree.get_commands():
  category='관리' if command.name in ('포인트관리','관리') else '기능' if command.name in ('출석','내정보','랭킹','선물','상점','구매') else '게임'
  command.description=f'[{category}] '+command.description

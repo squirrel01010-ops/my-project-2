@@ -523,5 +523,6 @@ def shop_catalog(uid,page=1):
  page=integer(page,1,100000);now=time.time()
  with db() as c:
   total=c.execute('SELECT COUNT(*) FROM products WHERE active=1').fetchone()[0]
+  page=min(page,max(1,(total+9)//10))
   rows=[dict(r) for r in c.execute("SELECT p.*,(SELECT COUNT(DISTINCT code) FROM inventory i WHERE product_id=p.id AND order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes,EXISTS(SELECT 1 FROM orders o WHERE o.uid=? AND o.role_id=p.role_id AND o.status='active' AND (o.expires IS NULL OR o.expires>?)) owned FROM products p WHERE active=1 ORDER BY id LIMIT 10 OFFSET ?",(uid,now,(page-1)*10))]
   return dict(products=rows,page=page,pages=max(1,(total+9)//10))
