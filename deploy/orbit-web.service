@@ -1,5 +1,5 @@
 [Unit]
-Description=ORBIT Web Dashboard
+Description=STELLAR Web Dashboard
 After=network-online.target
 Wants=network-online.target
 [Service]
