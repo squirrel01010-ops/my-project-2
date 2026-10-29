@@ -205,8 +205,8 @@ async def sync_roles(guild,uid):
  have={str(r.id) for r in member.roles};add=[guild.get_role(int(x)) for x in want-have];remove=[guild.get_role(int(x)) for x in (have&managed)-want]
  for role in add+remove:
   if not role or role.is_default() or role.managed or role>=guild.me.top_role:raise ValueError('역할이 없거나 봇보다 높은 역할입니다. 역할 순서를 확인하세요')
- if add:await member.add_roles(*add,reason='ORBIT 보상 동기화')
- if remove:await member.remove_roles(*remove,reason='ORBIT 레벨/기간 변경')
+ if add:await member.add_roles(*add,reason='STELLAR 보상 동기화')
+ if remove:await member.remove_roles(*remove,reason='STELLAR 레벨/기간 변경')
  key='nick:'+uid
  with core.db() as c:row=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
  old=json.loads(row[0]) if row else None
@@ -214,10 +214,10 @@ async def sync_roles(guild,uid):
   base=old['base'] if old and member.nick==old['last'] else member.nick
   nick=s['nicknameFormat'].replace('{name}',base or member.name).replace('{level}',str(u['level']))[:32]
   if nick!=member.nick:
-   await member.edit(nick=nick,reason='ORBIT 레벨 표시')
+   await member.edit(nick=nick,reason='STELLAR 레벨 표시')
    with core.db(True) as c:c.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(dict(base=base,last=nick))))
  elif old:
-  if member.nick==old['last']:await member.edit(nick=old['base'],reason='ORBIT 레벨 표시 해제')
+  if member.nick==old['last']:await member.edit(nick=old['base'],reason='STELLAR 레벨 표시 해제')
   with core.db(True) as c:c.execute('DELETE FROM meta WHERE key=?',(key,))
 
 async def send_channel(guild,channel,text,s):
@@ -248,7 +248,7 @@ async def process_jobs(guild):
    elif j['kind']=='season':await send_channel(guild,s['rankingChannel'],p['name']+' 종료\n'+'\n'.join(f"{i+1}. {u['name']} · {u['score']:,} EXP" for i,u in enumerate(p['ranking'])),s)
    elif j['kind']=='log':await send_channel(guild,s['logChannel'],p['text'],s)
    elif j['kind']=='social_result':await social_bot.announce(guild,p)
-   elif j['kind']=='test':await send_channel(guild,p['channel'],'ORBIT 알림 테스트 · 연결이 정상입니다.',s)
+   elif j['kind']=='test':await send_channel(guild,p['channel'],'STELLAR 알림 테스트 · 연결이 정상입니다.',s)
   except (discord.HTTPException,ValueError) as e:status='failed';error=('Discord 권한/요청 오류: '+str(getattr(e,'status',''))) if isinstance(e,discord.HTTPException) else str(e)
   with core.db(True) as c:c.execute('UPDATE jobs SET status=?,error=? WHERE id=?',(status,error[:500],j['id']))
 
@@ -311,7 +311,7 @@ async def on_ready():
  if not voice_tick.is_running():voice_tick.start()
  if not reconcile.is_running():reconcile.start()
  if not social_bot.live_updates.is_running():social_bot.live_updates.start()
- print('ORBIT Discord 연결 완료',flush=True)
+ print('STELLAR Discord 연결 완료',flush=True)
 
 async def main():
  if not GUILD_ID or not os.getenv('DISCORD_TOKEN'):raise SystemExit('DISCORD_GUILD_ID 및 DISCORD_TOKEN 환경변수가 필요합니다')
