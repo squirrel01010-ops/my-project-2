@@ -4,6 +4,7 @@ import secrets
 
 RNG = secrets.SystemRandom()
 CATALOG = {
+ 'baccarat': ('바카라','플레이어 2배 · 뱅커 1.95배 · 무승부 9배 · 무승부 시 양쪽 베팅 원금 반환',False),
  'coin': ('홀짝', '주사위 홀/짝을 맞히면 원금 포함 2배', False),
  'dice': ('주사위', '1~6 중 선택한 숫자가 나오면 6배', False),
  'baskin': ('배스킨31', '1~3개씩 숫자를 세고 31을 말하면 패배. 봇은 무작위 선택. 승리 2배', True),
@@ -59,6 +60,23 @@ def start(game, choice=None, config=None):
   finish(s,2 if (roll%2==1)==(choice=='odd') else 0,f'주사위: {roll}')
  elif game=='dice':
   number(choice,1,6);roll=draw(6,1) if w else RNG.randint(1,6);s['roll']=roll;finish(s,6 if roll==choice else 0,f'주사위: {roll}')
+ elif game=='baccarat':
+  if choice not in ('player','banker','tie'):raise ValueError('플레이어·뱅커·무승부 중 선택하세요')
+  deck=odds.deck(RNG,list(range(1,14))*32,w,lambda c:c-1)
+  player=[deck.pop()];banker=[deck.pop()];player.append(deck.pop());banker.append(deck.pop())
+  points=lambda hand:sum(c if c<10 else 0 for c in hand)%10
+  p,b=points(player),points(banker)
+  if max(p,b)<8:
+   third=None
+   if p<=5:third=deck.pop();player.append(third)
+   t=0 if third is not None and third>=10 else third
+   draw_banker=b<=5 if third is None else b<=2 or b==3 and t!=8 or b==4 and 2<=t<=7 or b==5 and 4<=t<=7 or b==6 and t in (6,7)
+   if draw_banker:banker.append(deck.pop())
+  p,b=points(player),points(banker);winner='tie' if p==b else 'player' if p>b else 'banker'
+  payouts={k:config.get(k+'Multiplier',v) for k,v in [('player',2),('banker',1.95),('tie',9)]}
+  mult=payouts[winner] if choice==winner else 1 if winner=='tie' and choice!='tie' else 0
+  s.update(player=player,dealer=banker,playerPoints=p,bankerPoints=b,choice=choice,winner=winner)
+  finish(s,mult,f'플레이어 {p}점 / 뱅커 {b}점 · '+dict(player='플레이어 승리',banker='뱅커 승리',tie='무승부')[winner])
  elif game=='slots':
   s['symbols']=[draw(5) for _ in range(3)]
   s['pairMultiplier']=config.get('pairMultiplier',0.5)
@@ -158,6 +176,7 @@ odds_CARDS=['A','2','3','4','5','6','7','8','9','10','J','Q','K']
 odds_CRASH_POINTS=[100,150,200,300,500,1000,2000,5000,10000]
 def odds_spec(labels,note,positive=False,minimum=1):return dict(labels=labels,note=note,positive=positive,minimum=minimum)
 odds_CATALOG={
+ 'baccarat':odds_spec(odds_CARDS,'8덱 · 양쪽 공통 카드 숫자 비중',True),
  'coin':odds_spec(list(map(str,range(1,7))),'주사위 숫자 비중 · 홀/짝 판정'),
  'dice':odds_spec(list(map(str,range(1,7))),'주사위 숫자 비중'),
  'slots':odds_spec(['🍒','🍋','🔔','⭐','💎'],'각 릴을 독립 추첨'),

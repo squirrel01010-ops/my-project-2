@@ -166,6 +166,9 @@ def validate_settings(value):
   if type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000:raise ValueError('룰렛 배율은 0~1000 사이 숫자여야 합니다')
  wheel=s['games']['wheel'].get('wheelMultipliers',[0,0,0,0,1,1,2,4])
  if not isinstance(wheel,list) or len(wheel)!=8 or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in wheel):raise ValueError('돌림판 배율은 0~1000 사이 숫자 8개를 입력하세요')
+ for key,default in [('playerMultiplier',2),('bankerMultiplier',1.95),('tieMultiplier',9)]:
+  v=s['games']['baccarat'].get(key,default)
+  if type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000:raise ValueError('바카라 배율은 0~1000 사이 숫자입니다')
  slot=s['games']['slots'];pair=slot.get('pairMultiplier',0.5);triples=slot.get('tripleMultipliers',games.SLOT_TRIPLES)
  if not isinstance(triples,list) or len(triples)!=5:raise ValueError('슬롯 모양별 배율은 5개를 입력하세요')
  if any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in [pair,*triples]):raise ValueError('슬롯 배율은 0~1000 사이 숫자여야 합니다')

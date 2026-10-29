@@ -19,7 +19,7 @@ intents=discord.Intents.default();intents.members=True;intents.voice_states=True
 client=discord.Client(intents=intents, proxy=os.getenv("HTTPS_PROXY") or None)
 tree=app_commands.CommandTree(client)
 voice_candidates=set()
-GAME_ICONS=dict(coin='🪙',dice='🎲',baskin='🍦',scratch='🎟️',slots='🎰',wheel='🎡',mines='💎',highlow='🃏',blackjack='♠️',roulette='🔴',indian='🪶',ttt='⭕',bomb='💣',tower='🗼',horse='🏇')
+GAME_ICONS=dict(baccarat='🃏',coin='🪙',dice='🎲',baskin='🍦',scratch='🎟️',slots='🎰',wheel='🎡',mines='💎',highlow='🃏',blackjack='♠️',roulette='🔴',indian='🪶',ttt='⭕',bomb='💣',tower='🗼',horse='🏇')
 commands_synced=False
 
 def command_status(**values):
@@ -192,7 +192,12 @@ async def roulette_command(i:discord.Interaction,베팅:app_commands.Range[int,1
 async def horse_command(i:discord.Interaction,베팅:app_commands.Range[int,1],말번호:app_commands.Range[int,1,5]):
  await start_game(i,'horse',베팅,말번호)
 
-SIMPLE_GAMES={k:v[0].replace(' ','') for k,v in games.CATALOG.items() if k not in ('coin','dice','roulette','horse')}
+@tree.command(name='바카라',description='플레이어·뱅커·무승부 중 승리할 쪽을 선택해요')
+@app_commands.choices(선택=[app_commands.Choice(name='플레이어',value='player'),app_commands.Choice(name='뱅커',value='banker'),app_commands.Choice(name='무승부',value='tie')])
+async def baccarat_command(i:discord.Interaction,베팅:app_commands.Range[int,1],선택:str):
+ await start_game(i,'baccarat',베팅,선택)
+
+SIMPLE_GAMES={k:v[0].replace(' ','') for k,v in games.CATALOG.items() if k not in ('coin','dice','roulette','horse','baccarat')}
 def register_game_command(game,name):
  async def command(i:discord.Interaction,베팅:app_commands.Range[int,1]):
   await start_game(i,game,베팅)

@@ -102,7 +102,7 @@ class Economy(unittest.TestCase):
   core.maintenance();self.assertEqual(len(core.state()['seasons']),2)
  def test_all_games_play_to_completion(self):
   for g in games.CATALOG:
-   choice={'coin':'odd','dice':1,'roulette':'red','horse':1}.get(g)
+   choice={'baccarat':'player','coin':'odd','dice':1,'roulette':'red','horse':1}.get(g)
    with self.subTest(game=g):
     r=self.op('play',dict(game=g,bet=100,choice=choice))
     while r['status']=='active':

@@ -4,7 +4,7 @@ import discord
 import games
 
 BUSY=set()
-DURATION=dict(coin=6,dice=7,baskin=6,scratch=9,slots=8,wheel=10,mines=6,highlow=7,blackjack=8,roulette=10,indian=8,ttt=6,bomb=9,tower=7,horse=12)
+DURATION=dict(baccarat=8,coin=6,dice=7,baskin=6,scratch=9,slots=8,wheel=10,mines=6,highlow=7,blackjack=8,roulette=10,indian=8,ttt=6,bomb=9,tower=7,horse=12)
 
 def frames(game):
  if game=='slots':return ['🎰 슬롯 회전 중\n\n🍒 │ 🔔 │ 🍋','🎰 슬롯 회전 중\n\n🍇 │ 🍒 │ 🔔','🎰 마지막 릴이 멈추는 중…\n\n🍇 │ 🔔 │ ❔']
@@ -67,6 +67,7 @@ def board(r):
  if g in ('coin','dice'):
   roll=s.get('roll',1);return box('       '+ '⚀⚁⚂⚃⚄⚅'[roll-1]+f'\n\n       {roll}'+(' · 홀수' if roll%2 else ' · 짝수'))
  if g=='horse':return horse_track(s.get('order',[1,2,3,4,5]),RACE_TICKS)+'\n'+'\n'.join(f'**{i+1}위**　{n}번 🐎' for i,n in enumerate(s.get('order',[])))
+ if g=='baccarat':return box('PLAYER\n'+card_table(s.get('player',[]))+'\n\nBANKER\n'+card_table(s.get('dealer',[])))
  if g=='blackjack':return box('DEALER\n'+card_table(s.get('dealer',[None,None]))+'\n\nPLAYER · '+str(games.total([n for n in s.get('player',[]) if n is not None]))+'\n'+card_table(s.get('player',[None,None])))
  if g=='indian':return box('상대 카드\n'+card_table([s.get('dealer')])+'\n\n내 카드\n'+card_table([s.get('player')]))
  if g=='highlow':return box(('이전  '+card(s['previous'])+'  →  ' if 'previous' in s else '')+'현재 카드\n'+card_table([s.get('card')]))
@@ -171,6 +172,15 @@ def card_sequence(r):
  return [(frame,DURATION[g]/len(out)) for frame in out]
 
 def sequence(r):
+ if r['game']=='baccarat':
+  import copy
+  v=copy.deepcopy(r);v.setdefault('state',{});out=[]
+  for key in ('player','dealer'):v['state'][key]=[None]*len(r.get('state',{}).get(key,[]))
+  out.append((board(v),1))
+  for i in range(3):
+   for key in ('player','dealer'):
+    if i<len(v['state'][key]):v['state'][key][i]=r['state'][key][i];out.append((board(v),1))
+  return out+[(board(r),1)]
  if r['game']=='horse':
   order=r.get('state',{}).get('order',[1,2,3,4,5])
   return [(horse_track(order,tick),DURATION['horse']/(RACE_TICKS+1)) for tick in range(RACE_TICKS+1)]+[(board(r),1)]

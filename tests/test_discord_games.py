@@ -16,7 +16,7 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
      serial+=1
      i=SimpleNamespace(id=serial,guild_id=456,channel_id=789,user=SimpleNamespace(id=123,display_name='tester',roles=[]),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock())
      command=bot.tree.get_command(name.replace(' ',''))
-     args={'coin':['odd'],'dice':[3],'roulette':['red'],'horse':[2]}.get(game,[])
+     args={'baccarat':['player'],'coin':['odd'],'dice':[3],'roulette':['red'],'horse':[2]}.get(game,[])
      await command.callback(i,100,*args)
      while True:
       embed=i.edit_original_response.await_args.kwargs['embed'];view=i.edit_original_response.await_args.kwargs['view']

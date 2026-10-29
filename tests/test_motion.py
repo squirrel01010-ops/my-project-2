@@ -22,7 +22,7 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
 
  def test_all_final_frames_match_result(self):
   for game in games.CATALOG:
-   choice={'coin':'odd','dice':1,'roulette':'red','horse':1}.get(game)
+   choice={'baccarat':'player','coin':'odd','dice':1,'roulette':'red','horse':1}.get(game)
    s=games.public_view(games.start(game,choice))
    r={'game':game,'state':s,'status':'done' if s['done'] else 'active','previous_state':{}}
    seq=game_motion.sequence(r)
