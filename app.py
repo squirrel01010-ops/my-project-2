@@ -106,6 +106,12 @@ class Handler(BaseHTTPRequestHandler):
      core.ensure(c,me['id'],me.get('global_name') or me['username']);c.execute('INSERT INTO sessions VALUES(?,?,?,?,?)',(digest(session),me['id'],me.get('global_name') or me['username'],secrets.token_urlsafe(24),time.time()+86400))
     return self.send(302,b'',headers={'Location':'/','Set-Cookie':self.cookie_header('orbit_session',session,86400)})
    who=self.identity()
+   if p.path=='/api/chat-health':
+    if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
+    return self.send(200,core.chat_health())
+   if p.path=='/api/history':return self.send(200,core.history(who['id'],who['admin'],{k:v[0] for k,v in query.items()}))
+   if p.path=='/api/activity':return self.send(200,core.personal_activity(who['id']))
+   if p.path=='/api/social':return self.send(200,core.social_state(who['id'],query.get('kind',['holdem'])[0]))
    if p.path=='/api/state':return self.send(200,{**core.state(who['id'],who['admin']), 'identity':who,**({'botStatus':bot_status()} if who['admin'] else {})})
    if p.path=='/api/export':
     if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')

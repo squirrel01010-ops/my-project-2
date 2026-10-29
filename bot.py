@@ -261,8 +261,15 @@ async def on_message(message):
    return
   except sqlite3.OperationalError as e:
    if not any(word in str(e).lower() for word in ('locked','busy')) or attempt==5:
-    logging.exception('Chat reward failed: message_id=%s',message.id);raise
+    logging.exception('Chat reward failed: message_id=%s',message.id)
+    try:await asyncio.to_thread(core.chat_failure,e)
+    except sqlite3.Error:logging.exception('Chat failure status could not be saved')
+    raise
    await asyncio.sleep(min(0.25*2**attempt,4))
+  except Exception as e:
+   try:await asyncio.to_thread(core.chat_failure,e)
+   except sqlite3.Error:logging.exception('Chat failure status could not be saved')
+   raise
 
 @client.event
 async def on_voice_state_update(member,before,after):

@@ -53,4 +53,16 @@ class HTTP(unittest.TestCase):
   status,raw,_=self.request('/api/state',headers=h)
   self.assertEqual(status,200);self.assertEqual(json.loads(raw)['botStatus']['state'],'pending')
 
+ def test_activity_endpoints_enforce_member_visibility(self):
+  with core.db(True) as c:
+   core.ensure(c,'activity-member','Member');c.execute('INSERT OR REPLACE INTO sessions VALUES(?,?,?,?,?)',(app.digest('activity-cookie'),'activity-member','Member','csrf',time.time()+60))
+  h={'Cookie':'orbit_session=activity-cookie'}
+  with patch.object(app,'membership',return_value=({'roles':[]},False)):
+   self.assertEqual(self.request('/api/chat-health',headers=h)[0],403)
+   status,raw,_=self.request('/api/history?uid=333',headers=h)
+   self.assertEqual(status,200);self.assertEqual(json.loads(raw)['rows'],[])
+   self.assertEqual(self.request('/api/activity',headers=h)[0],200)
+   status,raw,_=self.request('/api/social?kind=holdem',headers=h)
+   self.assertEqual(status,200);self.assertNotIn('ledger',json.loads(raw))
+
 if __name__=='__main__':unittest.main()

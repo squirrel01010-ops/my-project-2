@@ -71,6 +71,9 @@ def init():
   c.execute('CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(status,id)')
   c.execute('CREATE INDEX IF NOT EXISTS ledger_user_recent ON ledger(uid,id DESC)')
   c.execute('CREATE INDEX IF NOT EXISTS rounds_user_status ON game_rounds(uid,status)')
+  c.execute('CREATE TABLE IF NOT EXISTS chat_health(id INTEGER PRIMARY KEY,last_received REAL,last_paid REAL,processed INTEGER DEFAULT 0,duplicates INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,last_error TEXT,last_failure REAL)')
+  c.execute('INSERT OR IGNORE INTO chat_health(id) VALUES(1)')
+  c.execute('CREATE INDEX IF NOT EXISTS ledger_date ON ledger(created)')
   social.init(c)
   c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)',(json.dumps(DEFAULTS),))
   current=settings(c);c.execute('UPDATE settings SET data=? WHERE id=1',(json.dumps(current),))
@@ -186,7 +189,9 @@ def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=No
   s=settings(c);uid=ensure(c,uid,name)
   if kind not in ('chat','voice'):raise ValueError('활동 종류 오류')
   if kind=='chat':
-   if message_id is not None and not c.execute('INSERT OR IGNORE INTO chat_messages VALUES(?,?)',(str(message_id),now)).rowcount:return 0
+   c.execute('UPDATE chat_health SET last_received=? WHERE id=1',(time.time(),))
+   if message_id is not None and not c.execute('INSERT OR IGNORE INTO chat_messages VALUES(?,?)',(str(message_id),now)).rowcount:
+    c.execute('UPDATE chat_health SET duplicates=duplicates+1 WHERE id=1');return 0
   else:
    if str(channel) in s['excludedChannels'] or str(category) in s['excludedChannels'] or set(roles)&set(s['excludedRoles']):return 0
    try:cooldown(c,'voice:'+uid,55,now)
@@ -197,6 +202,7 @@ def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=No
    xp=min(xp,max(0,s['dailyCap']-used))
   c.execute('INSERT INTO activity VALUES(?,?,?,?,1,?) ON CONFLICT(uid,day,channel,kind) DO UPDATE SET amount=amount+1,xp=xp+excluded.xp',(uid,day,str(channel),kind,xp))
   if xp:adjust(c,uid,xp,('채팅' if kind=='chat' else '음성')+' 활동',s=s)
+  if kind=='chat':c.execute('UPDATE chat_health SET processed=processed+1,last_paid=CASE WHEN ?>0 THEN ? ELSE last_paid END WHERE id=1',(xp,time.time()))
   return xp
 
 def boosted(base,s,kind,channel='',roles=(),now=None):
@@ -418,3 +424,52 @@ def desired_roles(uid):
   return want,managed,u,s
 
 init()
+
+def chat_health():
+ with db() as c:
+  row=c.execute('SELECT * FROM chat_health WHERE id=1').fetchone()
+  s=settings(c)
+  return dict(row or {},reward=s['chatXP'])
+
+def chat_failure(error):
+ with db(True) as c:c.execute("UPDATE chat_health SET failures=failures+1,last_error=?,last_failure=?,last_received=? WHERE id=1",(type(error).__name__,time.time(),time.time()))
+
+def history(uid,admin=False,filters=None):
+ f=filters or {};page=integer(int(f.get('page',1)),1,1000000);clauses=[];params=[]
+ target=str(f.get('uid','')).strip() if admin else uid
+ if target:clauses.append('uid=?');params.append(target)
+ reason=str(f.get('reason','')).strip()[:200]
+ if reason:clauses.append("instr(reason,?)>0");params.append(reason)
+ with db() as c:
+  s=settings(c)
+  for key,op,extra in [('start','>=',0),('end','<',1)]:
+   if f.get(key):
+    day=datetime.strptime(f[key],'%Y-%m-%d')+timedelta(days=extra)
+    boundary=day.replace(tzinfo=ZoneInfo(s['timezone'])).astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%d %H:%M:%S')
+    clauses.append('created'+op+'?');params.append(boundary)
+  where=' WHERE '+' AND '.join(clauses) if clauses else ''
+  total=c.execute('SELECT COUNT(*) FROM ledger'+where,params).fetchone()[0]
+  rows=[dict(r) for r in c.execute('SELECT * FROM ledger'+where+' ORDER BY id DESC LIMIT 50 OFFSET ?',params+[(page-1)*50])]
+  return dict(rows=rows,total=total,page=page,pages=max(1,(total+49)//50))
+
+def personal_activity(uid):
+ with db() as c:
+  s=settings(c);day=today(s);week=day-timedelta(days=day.weekday())
+  rows=[dict(r) for r in c.execute('SELECT day,kind,SUM(amount) amount,SUM(xp) xp FROM activity WHERE uid=? AND day>=? GROUP BY day,kind ORDER BY day DESC',(uid,str(day-timedelta(days=29))))]
+  totals=dict(c.execute('SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) earned,COALESCE(SUM(CASE WHEN delta<0 THEN -delta ELSE 0 END),0) spent FROM ledger WHERE uid=?',(uid,)).fetchone())
+  reasons=[v[0]+suffix for v in games.CATALOG.values() for suffix in (' 베팅',' 정산')]+['홀덤 바이인 예치','홀덤 테이블 반환','홀덤 모집 퇴장 반환','크래시 베팅','크래시 정산','복권 구매','복권 당첨']
+  net=c.execute('SELECT COALESCE(SUM(delta),0) FROM ledger WHERE uid=? AND reason IN ('+','.join('?' for _ in reasons)+')',[uid,*reasons]).fetchone()[0]
+  u=c.execute('SELECT xp FROM users WHERE id=?',(uid,)).fetchone()
+  attendance=c.execute('SELECT * FROM attendance WHERE uid=?',(uid,)).fetchone()
+  return dict(days=rows,today=str(day),week=str(week),balance=u[0] if u else 0,gameNet=net,attendance=dict(attendance) if attendance else None,**totals)
+
+def social_state(uid,kind):
+ if kind not in social.CATALOG:raise ValueError('게임 종류를 확인하세요')
+ with db(True) as c:
+  s=settings(c);now=time.time()
+  for row in c.execute("SELECT state FROM live_games WHERE kind=? AND status IN ('lobby','active','open','flying')",(kind,)).fetchall():social.tick(c,json.loads(row[0]),now)
+  if kind=='lottery':social.ensure_draw(c,s,now)
+  rows=c.execute('SELECT state FROM live_games WHERE kind=? ORDER BY created DESC LIMIT 20',(kind,)).fetchall()
+  result={kind:[social.public(json.loads(r[0]),uid) for r in rows]}
+  if kind=='lottery':result['tickets']=[dict(r,numbers=json.loads(r['numbers'])) for r in c.execute('SELECT * FROM lottery_tickets WHERE uid=? ORDER BY rowid DESC LIMIT 100',(uid,))]
+  return dict(social=result,settings=dict(social=s['social'],timezone=s['timezone'],casino=s['casino']),serverTime=time.time())
