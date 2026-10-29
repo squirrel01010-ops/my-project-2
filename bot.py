@@ -314,8 +314,11 @@ async def process_jobs(guild):
  with core.db() as c:jobs=c.execute("SELECT * FROM jobs WHERE status='pending' ORDER BY id LIMIT 40").fetchall()
  s=await settings()
  for j in jobs:
-  p=json.loads(j['payload']);status='done';error=''
+  with core.db(True) as c:
+   if not c.execute("UPDATE jobs SET status='processing' WHERE id=? AND status='pending'",(j['id'],)).rowcount:continue
+  status='done';error=''
   try:
+   p=json.loads(j['payload'])
    if j['kind']=='roles':await sync_roles(guild,p['uid'])
    elif j['kind']=='all_roles':
     with core.db() as c:uids=[r[0] for r in c.execute('SELECT id FROM users')]
@@ -336,6 +339,7 @@ async def process_jobs(guild):
    elif j['kind']=='social_result':await social_bot.announce(guild,p)
    elif j['kind']=='test':await send_channel(guild,p['channel'],'STELLAR 알림 테스트 · 연결이 정상입니다.',s)
   except (discord.HTTPException,ValueError) as e:status='failed';error=('Discord 권한/요청 오류: '+str(getattr(e,'status',''))) if isinstance(e,discord.HTTPException) else str(e)
+  except Exception as e:status='failed';error='처리 오류: '+type(e).__name__
   with core.db(True) as c:c.execute('UPDATE jobs SET status=?,error=? WHERE id=?',(status,error[:500],j['id']))
 
 async def update_ranking(guild):
@@ -401,6 +405,7 @@ async def on_ready():
  print('STELLAR Discord 연결 완료',flush=True)
 
 async def main():
+ await asyncio.to_thread(core.recover_jobs)
  if not GUILD_ID or not os.getenv('DISCORD_TOKEN'):raise SystemExit('DISCORD_GUILD_ID 및 DISCORD_TOKEN 환경변수가 필요합니다')
  try:
   async with client:

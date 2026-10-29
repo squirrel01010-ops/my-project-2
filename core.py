@@ -69,6 +69,7 @@ def init():
   ''')
   c.execute('CREATE INDEX IF NOT EXISTS users_ranking ON users(xp DESC,id)')
   c.execute('CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(status,id)')
+  c.execute('CREATE INDEX IF NOT EXISTS jobs_coalesce ON jobs(kind,status,payload)')
   c.execute('CREATE INDEX IF NOT EXISTS ledger_user_recent ON ledger(uid,id DESC)')
   c.execute('CREATE INDEX IF NOT EXISTS rounds_user_status ON game_rounds(uid,status)')
   c.execute('CREATE TABLE IF NOT EXISTS chat_health(id INTEGER PRIMARY KEY,last_received REAL,last_paid REAL,processed INTEGER DEFAULT 0,duplicates INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,last_error TEXT,last_failure REAL)')
@@ -110,7 +111,13 @@ def user(c,uid,s=None):
  u=dict(r);s=settings(c) if s is None else s;u['level']=level(u['xp'],s);u['nextXP']=(u['level']+1)**2*s['levelBase'];return u
 
 def audit(c,actor,action,detail):c.execute('INSERT INTO audit(actor,action,detail,created) VALUES(?,?,?,?)',(actor,action,json.dumps(detail,ensure_ascii=False),time.time()))
-def job(c,kind,payload):c.execute('INSERT INTO jobs(kind,payload,created) VALUES(?,?,?)',(kind,json.dumps(payload),time.time()))
+def job(c,kind,payload):
+ encoded=json.dumps(payload,sort_keys=True)
+ if kind in ('roles','all_roles') and c.execute("SELECT 1 FROM jobs WHERE kind=? AND status='pending' AND payload=? LIMIT 1",(kind,encoded)).fetchone():return
+ c.execute('INSERT INTO jobs(kind,payload,created) VALUES(?,?,?)',(kind,encoded,time.time()))
+
+def recover_jobs():
+ with db(True) as c:c.execute("UPDATE jobs SET status='pending' WHERE status='processing'")
 def adjust(c,uid,delta,reason,score=True,s=None):
  integer(delta,-10**12,10**12);s=settings(c) if s is None else s;before=user(c,uid,s)
  if not c.execute('UPDATE users SET xp=xp+? WHERE id=? AND xp+? BETWEEN 0 AND 1000000000000000',(delta,uid,delta)).rowcount:raise ValueError('띵조코인이 부족하거나 잔액 한도를 초과합니다')
