@@ -19,6 +19,45 @@ intents=discord.Intents.default();intents.members=True;intents.voice_states=True
 client=discord.Client(intents=intents, proxy=os.getenv("HTTPS_PROXY") or None)
 tree=app_commands.CommandTree(client)
 voice_candidates=set()
+GAME_ICONS=dict(coin='🪙',dice='🎲',baskin='🍦',scratch='🎟️',slots='🎰',wheel='🎡',mines='💎',highlow='🃏',blackjack='♠️',roulette='🔴',indian='🪶',ttt='⭕',bomb='💣',tower='🗼',horse='🏇')
+commands_synced=False
+
+def command_status(**values):
+ with core.db(True) as c:
+  if 'request' not in values:
+   row=c.execute("SELECT value FROM meta WHERE key='command_sync_request'").fetchone()
+   values['request']=row[0] if row else ''
+  c.execute("INSERT INTO meta VALUES('command_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(dict(values,updated=time.time(),guild_id=str(GUILD_ID),application_id=str(client.application_id or ''))),))
+
+@tasks.loop(seconds=60)
+async def sync_commands():
+ global commands_synced
+ if not client.is_ready():return
+ with core.db() as c:
+  row=c.execute("SELECT value FROM meta WHERE key='command_sync_request'").fetchone()
+  previous=c.execute("SELECT value FROM meta WHERE key='command_sync'").fetchone()
+ request=row[0] if row else ''
+ status=json.loads(previous[0]) if previous else {}
+ if commands_synced and status.get('state')=='synced' and status.get('request')==request:return
+ if not client.get_guild(GUILD_ID):
+  command_status(state='error',request=request,count=0,message='설정된 서버에 봇이 없습니다. 서버 ID와 봇 초대를 확인하세요.')
+  return
+ command_status(state='syncing',request=request,count=0,message='서버 명령어를 등록하고 있어요.')
+ try:
+  guild=discord.Object(id=GUILD_ID)
+  tree.copy_global_to(guild=guild)
+  registered=await tree.sync(guild=guild)
+  expected={c.name for c in tree.get_commands(guild=guild)}
+  if {c.name for c in registered}!=expected:raise ValueError('명령어 등록 결과가 일치하지 않습니다')
+ except discord.Forbidden:
+  command_status(state='error',request=request,count=0,message='명령어 등록 권한이 없습니다. 아래 봇 연결 버튼으로 같은 서버에 다시 승인하세요.')
+ except Exception as error:
+  command_status(state='error',request=request,count=0,message='명령어 등록에 실패했습니다. 1분 뒤 자동 재시도합니다. ('+type(error).__name__+')')
+ else:
+  commands_synced=True
+  command_status(state='synced',request=request,count=len(registered),names=sorted(expected),message='서버 명령어 등록 완료')
+  print(f'STELLAR 명령어 {len(registered)}개 등록 완료 · 서버 {GUILD_ID}',flush=True)
 
 async def settings():
  with core.db() as c:return core.settings(c)
@@ -29,7 +68,7 @@ async def operation(i,path,body):
  return await asyncio.to_thread(core.operate,str(i.user.id),path,{**body,'key':str(i.id)},False,context(i))
 
 def game_embed(r):
- s=r['state'];e=discord.Embed(title=games.CATALOG[r['game']][0],color=0x9d85ff)
+ s=r['state'];e=discord.Embed(title=GAME_ICONS[r['game']]+' '+games.CATALOG[r['game']][0],color=0x9d85ff)
  e.description=f"베팅 **{r['bet']:,} EXP** · {'종료' if r['status']=='done' else '진행 중'}\n{s.get('message','')}"
  for k,label in [('roll','결과'),('symbols','릴'),('order','도착 순서'),('card','현재 카드'),('count','현재 숫자'),('player','내 카드'),('dealer','상대 카드'),('opened','선택한 칸'),('board','보드')]:
   if k not in s:continue
@@ -114,7 +153,20 @@ async def start_game(i,game,bet,choice=None):
 
 @tree.command(name='게임',description='게임별 명령어와 이용 방법을 확인해요')
 async def game_help(i:discord.Interaction):
- await i.response.send_message('🎮 **게임 명령어**\n'+ '\n'.join('/'+v[0].replace(' ','')+' — '+v[1] for v in games.CATALOG.values())+'\n/홀덤 · /복권 · /크래시\n진행 중인 게임은 /이어하기로 다시 열 수 있어요.',ephemeral=True)
+ if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
+ await i.response.defer(ephemeral=True)
+ s=await settings()
+ e=discord.Embed(title='🎮 STELLAR · 게임 라운지',description='작은 한 판, 큰 즐거움.\n`/출석`으로 경험치를 받고 `/내정보`에서 잔액을 확인하세요.',color=int(s['embedColor'][1:],16))
+ e.add_field(name='🎲 바로 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if not v[2]),inline=True)
+ e.add_field(name='🃏 선택하며 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if v[2]),inline=True)
+ e.add_field(name='🤝 함께 즐기기',value='/홀덤 · /복권 · /크래시',inline=False)
+ e.add_field(name='💎 이용 안내',value=f"전체 베팅 범위 **{s['minBet']:,} ~ {s['maxBet']:,} EXP**\n게임별 한도와 허용 역할·채널도 적용됩니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
+ e.set_footer(text='✦ STELLAR · 서버 가상 경험치로 즐기는 게임')
+ await i.followup.send(embed=e,ephemeral=True)
+
+@tree.command(name='도박',description='게임 라운지와 사용할 수 있는 게임 명령어를 확인해요')
+async def casino_help(i:discord.Interaction):
+ await game_help.callback(i)
 
 @tree.command(name='홀짝',description='주사위가 홀수일지 짝수일지 맞혀요')
 @app_commands.choices(선택=[app_commands.Choice(name='홀',value='odd'),app_commands.Choice(name='짝',value='even')])
@@ -306,6 +358,7 @@ async def reconcile():
 
 @client.event
 async def on_ready():
+ if not sync_commands.is_running():sync_commands.start()
  if not client.get_guild(GUILD_ID):print('지정된 서버에 봇을 초대하세요.',flush=True);return
  if not worker.is_running():worker.start()
  if not voice_tick.is_running():voice_tick.start()
@@ -315,9 +368,18 @@ async def on_ready():
 
 async def main():
  if not GUILD_ID or not os.getenv('DISCORD_TOKEN'):raise SystemExit('DISCORD_GUILD_ID 및 DISCORD_TOKEN 환경변수가 필요합니다')
- async with client:
-  await client.login(os.environ['DISCORD_TOKEN'])
-  guild=discord.Object(id=GUILD_ID);tree.copy_global_to(guild=guild);await tree.sync(guild=guild)
-  await client.connect(reconnect=True)
+ try:
+  async with client:
+   await client.login(os.environ['DISCORD_TOKEN'])
+   await client.connect(reconnect=True)
+ except discord.PrivilegedIntentsRequired:
+  message='Discord 개발자 포털의 Bot 설정에서 Server Members Intent를 켜고 봇을 재시작하세요.'
+  command_status(state='error',count=0,message=message)
+  raise SystemExit(message)
+ except discord.LoginFailure:
+  message='봇 로그인에 실패했습니다. 호스팅의 DISCORD_TOKEN을 확인하세요.'
+  command_status(state='error',count=0,message=message)
+  raise SystemExit(message)
 social_bot.register(client,tree,GUILD_ID)
 if __name__=='__main__':asyncio.run(main())
+

@@ -1,6 +1,37 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#11131b"><title>STELLAR · 커뮤니티 컨트롤룸</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/social.js" defer></script></head>
-<body><aside><a class="brand" href="/">◈ <span>STELLAR<small>COMMUNITY CONTROL ROOM</small></span></a><div class="workspace"><span class="server-icon">S</span><div>우리의 서버<small id="connection">연결 상태 확인 중</small></div></div><nav aria-label="메인 메뉴"><button data-page="overview" class="selected">▦ <span>대시보드</span></button><button data-page="members">♙ <span>멤버 · 리더보드</span></button><button data-page="casino">♧ <span>미니게임</span><b>15</b></button><button data-page="shop">◇ <span>경험치 상점</span></button><button data-page="seasons">⚑ <span>시즌</span></button><button data-page="settings" data-admin>⚙ <span>서버 설정</span></button><button data-page="logs">≡ <span>거래 · 운영 기록</span></button></nav><div class="side-bottom"><span class="dot"></span> SINGLE SERVER EDITION<p>활동부터 보상까지,<br>우리 서버만의 궤도.</p></div></aside>
-<main><header><div><div class="eyebrow">YOUR COMMUNITY / <span id="crumb">OVERVIEW</span></div><h1 id="page-title">대시보드</h1></div><div class="header-right"><button id="refresh" class="icon" aria-label="새로고침">↻</button><span id="identity">로그인 전</span><button id="logout" hidden>로그아웃</button></div></header>
-<div id="notice" role="status" aria-live="polite"></div><section id="login" class="panel login-panel"><div><span class="eyebrow">WELCOME TO STELLAR</span><h2>우리 서버의 다음 레벨.</h2><p>디스코드로 로그인하고 활동, 보상, 게임을 한곳에서 확인하세요.</p><a href="/auth/login" class="button primary" id="discord-login">Discord로 로그인 ↗</a><p id="login-hint" class="muted"></p></div><details id="local-login"><summary>로컬 관리자 연결</summary><form id="login-form"><label>관리자 토큰<input id="token" type="password" autocomplete="off" required placeholder="환경변수로 설정한 관리자 토큰"></label><button class="primary">연결</button></form></details></section>
-<div id="content"></div><footer>STELLAR <span>경험치를 사용하면 레벨도 함께 변합니다.</span></footer></main><dialog id="modal"><button id="close-modal" class="close" aria-label="닫기">×</button><div id="modal-body"></div></dialog></body></html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0c101b">
+<title>STELLAR · 함께 빛나는 커뮤니티</title>
+<link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/social.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<aside>
+ <a class="brand" href="/" aria-label="STELLAR 홈"><span class="brand-mark" aria-hidden="true">✦</span><span>stellar<small>YOUR COMMUNITY, BRIGHTER.</small></span></a>
+ <div class="workspace"><span class="server-icon" aria-hidden="true">🪐</span><div><strong>우리의 작은 우주</strong><small id="connection">연결 상태 확인 중</small></div></div>
+ <div class="nav-caption">WORKSPACE</div>
+ <nav aria-label="메인 메뉴">
+  <button data-page="overview" class="selected" aria-current="page"><span class="nav-icon" aria-hidden="true">🏠</span><span>홈</span></button>
+  <button data-page="members"><span class="nav-icon" aria-hidden="true">🏆</span><span>멤버 · 랭킹</span></button>
+  <button data-page="casino"><span class="nav-icon" aria-hidden="true">🎮</span><span>게임 라운지</span><b>15</b></button>
+  <button data-page="shop"><span class="nav-icon" aria-hidden="true">🎁</span><span>포인트 상점</span></button>
+  <button data-page="seasons"><span class="nav-icon" aria-hidden="true">🌙</span><span>시즌</span></button>
+  <button data-page="settings" data-admin hidden><span class="nav-icon" aria-hidden="true">⚙️</span><span>서버 설정</span></button>
+  <button data-page="logs" data-admin hidden><span class="nav-icon" aria-hidden="true">📋</span><span>운영 기록</span></button>
+ </nav>
+ <div class="side-bottom"><div class="constellation" aria-hidden="true">✧ · ˚　✦　˚ · ✧</div><strong>함께할수록 빛나는 곳.</strong><p>대화하고, 플레이하고,<br>우리만의 기록을 쌓아요.</p><span class="version">STELLAR / COMMUNITY</span></div>
+</aside>
+<main>
+ <header><div><div class="eyebrow">MY SPACE <span class="divider">/</span> <span id="crumb">OVERVIEW</span></div><h1 id="page-title">우리 서버 한눈에 <span aria-hidden="true">✦</span></h1></div><div class="header-right"><span id="identity">반가워요 👋</span><button id="refresh" class="icon" aria-label="새로고침" title="새로고침">↻</button><button id="logout" hidden>로그아웃</button></div></header>
+ <div id="notice" role="status" aria-live="polite"></div>
+ <section id="login" class="panel login-panel">
+  <div class="login-copy"><span class="tag">✦ WELCOME TO STELLAR</span><h2>우리 서버의<br><span>빛나는 일상.</span></h2><p>작은 대화부터 즐거운 한 판까지.<br>함께 쌓은 순간을 경험치와 보상으로 만나보세요.</p><a href="/auth/login" class="button primary" id="discord-login">Discord로 시작하기 <span aria-hidden="true">↗</span></a><p id="login-hint" class="muted"></p></div>
+  <div class="stellar-art" aria-hidden="true"><div class="orbit-ring ring-one"></div><div class="orbit-ring ring-two"></div><div class="planet">✦</div><span class="satellite s-one">🎮</span><span class="satellite s-two">💎</span><span class="star star-one">✧</span><span class="star star-two">✦</span></div>
+  <details id="local-login"><summary>🔑 관리자 연결</summary><form id="login-form"><label>관리자 토큰<input id="token" type="password" autocomplete="off" required placeholder="관리자 토큰을 입력하세요"></label><button class="primary">관리 화면 열기</button></form></details>
+ </section>
+ <div id="content" tabindex="-1"></div>
+ <footer><a href="/">✦ stellar</a><span>함께 쌓는 즐거움. 함께 만드는 기록.</span><span>가상 경험치 전용</span></footer>
+</main>
+<dialog id="modal" aria-labelledby="modal-title"><button id="close-modal" class="close" aria-label="닫기">×</button><div id="modal-body"></div></dialog>
+</body></html>

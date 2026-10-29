@@ -26,6 +26,18 @@ BOT_TOKEN=os.getenv('DISCORD_TOKEN','')
 SECURE=ORIGIN.startswith('https://')
 
 def digest(v):return hashlib.sha256(v.encode()).hexdigest()
+
+def bot_status():
+ with core.db() as c:
+  row=c.execute("SELECT value FROM meta WHERE key='command_sync'").fetchone()
+  requested=c.execute("SELECT value FROM meta WHERE key='command_sync_request'").fetchone()
+ status=json.loads(row[0]) if row else dict(state='unknown',count=0,message='봇의 명령어 등록 기록을 기다리고 있어요.')
+ if requested and status.get('request')!=requested[0]:
+  status={**status,'state':'pending','message':'재등록을 요청했어요. 연결된 봇이 1분 안에 처리합니다.'}
+ app_id=status.get('application_id') or CLIENT
+ permissions=(1<<10)|(1<<11)|(1<<14)|(1<<16)|(1<<27)|(1<<28)
+ invite='https://discord.com/oauth2/authorize?'+urllib.parse.urlencode(dict(client_id=app_id,scope='bot applications.commands',permissions=permissions,guild_id=GUILD,disable_guild_select='true')) if app_id and GUILD else None
+ return dict(status,invite=invite,configured=bool(BOT_TOKEN and GUILD),configuredGuild=GUILD)
 def discord_api(path,token,method='GET',data=None,bearer=False):
  raw=urllib.parse.urlencode(data).encode() if data is not None else None
  headers={'User-Agent':'StellarBot/1.0'}
@@ -94,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
      core.ensure(c,me['id'],me.get('global_name') or me['username']);c.execute('INSERT INTO sessions VALUES(?,?,?,?,?)',(digest(session),me['id'],me.get('global_name') or me['username'],secrets.token_urlsafe(24),time.time()+86400))
     return self.send(302,b'',headers={'Location':'/','Set-Cookie':self.cookie_header('orbit_session',session,86400)})
    who=self.identity()
-   if p.path=='/api/state':return self.send(200,{**core.state(who['id'],who['admin']), 'identity':who})
+   if p.path=='/api/state':return self.send(200,{**core.state(who['id'],who['admin']), 'identity':who,**({'botStatus':bot_status()} if who['admin'] else {})})
    if p.path=='/api/export':
     if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
     stream=io.StringIO();writer=csv.writer(stream);writer.writerow(['id','uid','delta','reason','created'])
@@ -120,6 +132,11 @@ class Handler(BaseHTTPRequestHandler):
     with core.db(True) as c:c.execute('DELETE FROM sessions WHERE hash=?',(digest(self.cookie('orbit_session')),))
     return self.send(200,dict(ok=True),headers={'Set-Cookie':self.cookie_header('orbit_session','',0)})
    if not self.path.startswith('/api/'):return self.send(404,dict(error='잘못된 경로'))
+   if self.path=='/api/commands/sync':
+    if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
+    with core.db(True) as c:
+     c.execute("INSERT INTO meta VALUES('command_sync_request',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(secrets.token_hex(16),))
+    return self.send(200,dict(ok=True,message='명령어 재등록을 요청했어요.'))
    if self.path=='/api/gift':
     target=str(body.get('to',''))
     if not target.isdigit():raise ValueError('대상 유저 ID를 확인하세요')
@@ -148,3 +165,4 @@ def serve():
  if host not in ('127.0.0.1','localhost') and not SECURE:raise RuntimeError('외부 접속은 HTTPS PUBLIC_URL 설정 후 사용하세요')
  print(f'STELLAR web: {ORIGIN}',flush=True);ThreadingHTTPServer((host,port),Handler).serve_forever()
 if __name__=='__main__':serve()
+

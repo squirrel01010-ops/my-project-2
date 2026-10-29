@@ -38,6 +38,7 @@ class HTTP(unittest.TestCase):
    self.assertEqual(self.request('/api/adjust',dict(key='adjust',amount=100),h)[0],403)
    self.assertEqual(self.request('/api/attendance',dict(key='attend'),h)[0],200)
    self.assertEqual(self.request('/api/export',headers=h)[0],403)
+   self.assertEqual(self.request('/api/commands/sync',dict(key='sync'),h)[0],403)
  def test_oauth_state_mismatch(self):
   self.assertEqual(self.request('/auth/callback?state=forged&code=no')[0],403)
  def test_hidden_game_data_http(self):
@@ -45,5 +46,11 @@ class HTTP(unittest.TestCase):
   self.request('/api/adjust',dict(id='555',amount=1000,key='setup555'),h)
   status,raw,_=self.request('/api/play',dict(id='555',game='mines',bet=10,key='mine555'),h)
   self.assertEqual(status,200);self.assertNotIn('hazards',json.loads(raw)['state'])
+
+ def test_admin_can_request_command_registration(self):
+  h={'Authorization':'Bearer test-only-token'}
+  self.assertEqual(self.request('/api/commands/sync',dict(key='sync'),h)[0],200)
+  status,raw,_=self.request('/api/state',headers=h)
+  self.assertEqual(status,200);self.assertEqual(json.loads(raw)['botStatus']['state'],'pending')
 
 if __name__=='__main__':unittest.main()
