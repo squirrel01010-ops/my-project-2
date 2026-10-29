@@ -19,13 +19,27 @@ def frames(game):
  if game=='ttt':return ['⭕ ❌ ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n수를 두는 중…','🤔 상대가 생각 중…','⭕ ❌ 다음 수 확인 중…']
  return ['🔢 숫자를 세는 중…','🔢 1 · 2 · 3 …','🤔 상대의 선택 확인 중…']
 
+WHEEL_LABELS=['💀 꽝','💀 꽝','💀 꽝','💀 꽝','🪙 ×1','🪙 ×1','⭐ ×2','🌟 ×4']
+def wheel_board(index,multipliers=None):
+ labels=WHEEL_LABELS if multipliers is None else [('💀 꽝' if m==0 else f'🪙 ×{m:g}') for m in multipliers]
+ return '\n'.join(('➜ **'+label+'**' if n==index else '　'+label) for n,label in enumerate(labels))
+
+def sequence(r):
+ game=r['game']
+ if game=='wheel':
+  target=r.get('state',{}).get('segment',0)
+  positions=[(target-offset)%8 for offset in (19,16,13,10,7,5,3,1,0)]
+  delays=[.5,.6,.7,.8,1,1.2,1.4,1.7,2.1]
+  return [(wheel_board(index,r.get('state',{}).get('wheelMultipliers')),delay) for index,delay in zip(positions,delays)]
+ return [(frame,DURATION[game]/len(frames(game))) for frame in frames(game)]
+
 async def reveal(edit,r,final_embed,final_view):
  try:
-  for frame in frames(r['game']):
-   e=discord.Embed(title=games.CATALOG[r['game']][0],description=frame,color=0x9d85ff)
-   e.set_footer(text='결과 공개 연출 · 표시되는 중간 그림은 실제 결과가 아닙니다')
+  for frame,delay in sequence(r):
+   e=discord.Embed(title=('🎡 돌림판이 돌아가고 있어요…' if r['game']=='wheel' else games.CATALOG[r['game']][0]+' 진행 중…'),description=(f"👤 {r.get('display_name','참가자')} · 🪙 {r.get('bet',0):,} EXP\n\n"+frame),color=0xf1c40f)
+   e.set_footer(text='행운을 빌어요!')
    await edit(embed=e,view=discord.ui.View(timeout=None))
-   await asyncio.sleep(DURATION[r['game']]/len(frames(r['game'])))
+   await asyncio.sleep(delay)
  except discord.HTTPException:
   pass
  finally:

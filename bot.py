@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime,timezone
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).with_name('.env'))
@@ -28,8 +29,18 @@ async def operation(i,path,body):
  if i.guild_id!=GUILD_ID:raise ValueError('이 봇은 지정된 서버에서만 사용할 수 있어요')
  return await asyncio.to_thread(core.operate,str(i.user.id),path,{**body,'key':str(i.id)},False,context(i))
 
+async def decorate_round(i,r):
+ r['display_name']=i.user.display_name
+ def balance():
+  with core.db() as c:return core.user(c,str(i.user.id))['xp']
+ r['balance']=await asyncio.to_thread(balance)
+ return r
+
+
 def game_embed(r):
- s=r['state'];e=discord.Embed(title=games.CATALOG[r['game']][0],color=0x9d85ff)
+ s=r['state'];done=r['status']=='done';net=r.get('payout',0)-r['bet']
+ e=discord.Embed(title=games.CATALOG[r['game']][0],color=(0x2ecc71 if net>=0 else 0xe74c3c) if done else 0x9d85ff)
+ if r['game']=='wheel' and done:e.title=f"🎡 돌림판 → ×{s.get('wheelMultipliers',[0,0,0,0,1,1,2,4])[s['segment']]} 당첨!"
  e.description=f"베팅 **{r['bet']:,} EXP** · {'종료' if r['status']=='done' else '진행 중'}\n{s.get('message','')}"
  for k,label in [('roll','결과'),('symbols','릴'),('order','도착 순서'),('card','현재 카드'),('count','현재 숫자'),('player','내 카드'),('dealer','상대 카드'),('opened','선택한 칸'),('board','보드')]:
   if k not in s:continue
@@ -42,9 +53,13 @@ def game_embed(r):
   elif k=='opened':value=' · '.join(str(n+1)+'번' for n in value) or '아직 선택하지 않았어요'
   elif k=='board':value='\n'.join(' '.join(value[n+j] or '⬜' for j in range(3)) for n in (0,3,6))
   e.add_field(name=label,value=str(value)[:1024],inline=False)
+ if r['game']=='wheel':e.add_field(name='돌림판',value=game_motion.wheel_board(s['segment'],s.get('wheelMultipliers')),inline=False)
  if r['status']=='done':e.add_field(name='정산',value=f"반환 {r['payout']:,} EXP · 순손익 {r['payout']-r['bet']:+,} EXP")
  elif s.get('mult',0):e.add_field(name='현재 원금 포함 배당',value=f"{s['mult']:.3f}배 (수익 수수료 {r['fee']}%)")
- e.set_footer(text='게임 시간이 지나면 베팅금이 소멸합니다. /이어하기로 복구할 수 있어요.')
+ if s.get('winChance') is not None:e.add_field(name='현재 당첨 확률',value=f"{s['winChance']:g}%")
+ if s.get('profitScale',1)!=1:e.add_field(name='승리 수익 배율',value=f"×{s['profitScale']:g}")
+ if 'balance' in r:e.add_field(name='💰 잔액',value=f"{r['balance']:,} EXP",inline=False)
+ e.set_footer(text=r.get('display_name','게임 결과')+(' · 진행 중인 게임은 /이어하기' if not done else ''))
  return e
 
 def game_view(r):
@@ -66,6 +81,16 @@ def game_view(r):
 
 @client.event
 async def on_interaction(i):
+ if i.type==discord.InteractionType.component and i.data.get('custom_id','').startswith('attendance:'):
+  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요.',ephemeral=True)
+  mode=i.data['custom_id'].split(':')[1]
+  if mode not in ('streak','attendance'):return
+  await i.response.defer(ephemeral=True)
+  d=await asyncio.to_thread(core.state)
+  rows=d['rankings'][mode][:10];unit='일' if mode=='streak' else '회'
+  title='🔥 연속 출석 랭킹' if mode=='streak' else '📅 누적 출석 랭킹'
+  text='\n'.join(f"**{n+1}위** {r['name']} · **{r['score']:,}{unit}**" for n,r in enumerate(rows)) or '아직 출석 기록이 없어요.'
+  return await i.followup.send(embed=discord.Embed(title=title,description=text,color=0x9d85ff),ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
  if await social_bot.handle(i):return
  if i.type!=discord.InteractionType.component or not i.data.get('custom_id','').startswith('orbit:'):return
  await i.response.defer()
@@ -76,16 +101,28 @@ async def on_interaction(i):
   game_motion.BUSY.add(rid)
   try:
    r=await operation(i,'game/action',dict(round=rid,revision=int(rev),action=act,value=int(value) if value else None))
+   await decorate_round(i,r)
    if act=='cashout':await i.edit_original_response(embed=game_embed(r),view=game_view(r))
    else:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
   finally:game_motion.BUSY.discard(rid)
  except (ValueError,PermissionError) as e:await i.followup.send(str(e),ephemeral=True)
 
-@tree.command(name='출석',description='오늘의 출석 경험치를 받아요')
+def attendance_view():
+ v=discord.ui.View(timeout=None)
+ for label,mode in [('🔥 연속 출석 랭킹','streak'),('📅 누적 출석 랭킹','attendance')]:
+  v.add_item(discord.ui.Button(label=label,custom_id='attendance:'+mode,style=discord.ButtonStyle.primary if mode=='streak' else discord.ButtonStyle.secondary))
+ return v
+
+@tree.command(name='출석',description='오늘의 출석 보상과 출석 기록을 확인해요')
 async def attendance(i:discord.Interaction):
  await i.response.defer(ephemeral=True);r=await operation(i,'attendance',{})
- s=await settings();msg=s['attendanceMessage'].replace('{user}',i.user.display_name).replace('{xp}',str(r['xp'])).replace('{streak}',str(r['streak']))
- await i.followup.send(msg[:1900],ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
+ e=discord.Embed(title='✅ 출석체크 완료!',description=f"출석체크 보상으로 **{r['xp']:,} EXP**를 획득했어요!",color=0x2ecc71,timestamp=datetime.now(timezone.utc))
+ e.add_field(name='🔥 연속 출석',value=f"**{r['streak']:,}일**",inline=False)
+ e.add_field(name='📅 총 출석',value=f"**{r['total']:,}회**",inline=False)
+ e.set_footer(text=i.user.display_name,icon_url=str(i.user.display_avatar.url))
+ await i.followup.send(embed=e,view=attendance_view(),ephemeral=True)
+
+tree.command(name='출석체크',description='오늘의 출석 보상과 출석 기록을 확인해요')(attendance.callback)
 
 @tree.command(name='내정보',description='현재 경험치와 레벨을 확인해요')
 async def profile(i:discord.Interaction):
@@ -108,6 +145,7 @@ async def gift(i:discord.Interaction,대상:discord.Member,금액:app_commands.R
 async def start_game(i,game,bet,choice=None):
  await i.response.defer()
  r=await operation(i,'play',dict(game=game,bet=bet,choice=choice))
+ await decorate_round(i,r)
  game_motion.BUSY.add(str(r['id']))
  try:await game_motion.reveal(i.edit_original_response,r,game_embed(r),game_view(r))
  finally:game_motion.BUSY.discard(str(r['id']))
@@ -168,7 +206,7 @@ async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,�
  member=await i.guild.fetch_member(i.user.id)
  roles=await i.guild.fetch_roles()
  owned={r.id for r in member.roles}
- if i.user.id!=i.guild.owner_id and not any(r.id in owned and r.permissions.administrator for r in roles):raise PermissionError('관리자 권한이 있는 역할이 필요합니다')
+ if str(i.user.id) not in os.getenv('ADMIN_USER_IDS','').split(',') and i.user.id!=i.guild.owner_id and not any(r.id in owned and r.permissions.administrator for r in roles):raise PermissionError('관리자 권한이 있는 역할이 필요합니다')
  if 대상.bot:raise ValueError('봇의 포인트는 변경할 수 없습니다')
  if 작업 not in ('give','take','set'):raise ValueError('잘못된 작업입니다')
  r=await asyncio.to_thread(core.operate,str(i.user.id),'adjust',dict(id=str(대상.id),name=대상.display_name,amount=-금액 if 작업=='take' else 금액,mode='set' if 작업=='set' else 'add',reason=사유,key=str(i.id)),True,context(i))

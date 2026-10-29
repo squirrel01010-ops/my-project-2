@@ -149,6 +149,15 @@ def validate_settings(value):
   if not isinstance(cfg,dict) or type(cfg.get('enabled')) is not bool:raise ValueError('게임 설정을 확인하세요')
   integer(cfg.get('fee'),0,30);integer(cfg.get('minBet'),1);integer(cfg.get('maxBet'),1)
   if cfg['maxBet']<cfg['minBet']:raise ValueError('게임 베팅 한도를 확인하세요')
+  for key,lo,hi in [('winChance',0,100),('winMultiplier',0,1000),('profitScale',0,100)]:
+   v=cfg.get(key)
+   if v is not None and (type(v) not in (int,float) or not math.isfinite(v) or not lo<=v<=hi):raise ValueError('확률·배당 설정 범위를 확인하세요')
+  if g not in games.CONFIGURABLE_CHANCE and (cfg.get('winChance') is not None or cfg.get('winMultiplier') is not None):raise ValueError('이 게임은 승률 직접 설정을 지원하지 않습니다')
+  if g=='wheel':
+   for key,default,maximum in [('wheelWeights',[1]*8,1000000),('wheelMultipliers',[0,0,0,0,1,1,2,4],1000)]:
+    v=cfg.get(key,default)
+    if not isinstance(v,list) or len(v)!=8 or any(type(x) not in (int,float) or not math.isfinite(x) or not 0<=x<=maximum for x in v):raise ValueError('돌림판은 8개 칸의 확률 가중치와 배당을 입력하세요')
+   if sum(cfg.get('wheelWeights',[1]*8))<=0:raise ValueError('돌림판 가중치 합은 0보다 커야 합니다')
  s['social']=social.validate(s.get('social',{}))
  return s
 
@@ -189,7 +198,8 @@ def round_view(r):
 
 def settle(c,r,s):
  # Fee is on positive profit only; stake refunds are never taxed.
- raw=int(r['bet']*s['mult']);payout=raw-max(0,raw-r['bet'])*r['fee']//100
+ mult=s['mult'];mult=1+(mult-1)*s.get('profitScale',1) if mult>1 else mult
+ raw=int(r['bet']*mult);payout=raw-max(0,raw-r['bet'])*r['fee']//100
  if payout:adjust(c,r['uid'],payout,games.CATALOG[r['game']][0]+' 정산')
  c.execute("UPDATE game_rounds SET status='done',payout=?,state=? WHERE id=?",(payout,json.dumps(s),r['id']))
 
@@ -263,7 +273,7 @@ def operate(actor,path,b,admin=False,context=None):
      if s['casinoChannels'] and context.get('channel') not in s['casinoChannels']:raise PermissionError('지정된 디스코드 채널에서 플레이하세요')
     bet=integer(b.get('bet'),max(s['minBet'],cfg['minBet']),min(s['maxBet'],cfg['maxBet']))
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요')
-    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'));adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
+    cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),cfg);adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
     r=c.execute('SELECT * FROM game_rounds WHERE id=?',(rid,)).fetchone()

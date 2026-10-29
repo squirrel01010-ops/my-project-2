@@ -20,6 +20,7 @@ CATALOG = {
  'tower': ('타워', '층마다 3칸 중 안전한 칸 2개. 최대 6층, 정산 가능', True),
  'horse': ('경마', '동일한 확률의 말 5마리. 선택한 말이 우승하면 5배', False),
 }
+CONFIGURABLE_CHANCE={'coin','dice','slots','scratch','roulette','horse'}
 RED = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 
 def number(value, lo, hi):
@@ -36,25 +37,46 @@ def finish(s,mult,message):
  s.update(done=True,mult=mult,message=message)
  return s
 
-def start(game, choice=None):
+def start(game, choice=None, config=None):
+ config=config or {}
+ chance=config.get('winChance')
+ win=None if chance is None else RNG.random()*100<chance
  if game not in CATALOG:raise ValueError('지원하지 않는 게임')
  s=dict(game=game,done=False,mult=0,message='',step=0)
  if game=='coin':
   if choice not in ('odd','even'):raise ValueError('odd 또는 even을 선택하세요')
-  roll=RNG.randint(1,6);s['roll']=roll
+  roll=RNG.randint(1,6)
+  if win is not None:
+   target=(choice=='odd') if game=='coin' else None
+   if game=='coin':roll=RNG.choice([n for n in range(1,7) if (n%2==1)==(target if win else not target)])
+   else:roll=choice if win else RNG.choice([n for n in range(1,7) if n!=choice])
+  s['roll']=roll
   finish(s,2 if (roll%2==1)==(choice=='odd') else 0,f'주사위: {roll}')
  elif game=='dice':
-  number(choice,1,6);roll=RNG.randint(1,6);s['roll']=roll;finish(s,6 if roll==choice else 0,f'주사위: {roll}')
+  number(choice,1,6);roll=RNG.randint(1,6)
+  if win is not None:roll=choice if win else RNG.choice([n for n in range(1,7) if n!=choice])
+  s['roll']=roll;finish(s,6 if roll==choice else 0,f'주사위: {roll}')
  elif game in ('slots','scratch'):
   n=5 if game=='slots' else 4;s['symbols']=[RNG.randrange(n) for _ in range(3)]
+  if win is not None:
+   symbol=RNG.randrange(n);s['symbols']=[symbol]*3 if win else [symbol,(symbol+1)%n,RNG.randrange(n)]
   finish(s,n*n if len(set(s['symbols']))==1 else 0,'세 칸 일치!' if len(set(s['symbols']))==1 else '다음 기회에')
  elif game=='wheel':
-  s['segment']=RNG.randrange(8);m=[0,0,0,0,1,1,2,4][s['segment']];finish(s,m,f'{m}배 칸에 멈췄어요')
+  weights=config.get('wheelWeights',[1]*8);multipliers=config.get('wheelMultipliers',[0,0,0,0,1,1,2,4])
+  s['wheelMultipliers']=multipliers;s['wheelWeights']=weights
+  s['segment']=RNG.choices(range(8),weights=weights,k=1)[0];m=multipliers[s['segment']];finish(s,m,f'{m}배 칸에 멈췄어요')
  elif game=='roulette':
   if choice not in ('red','black','zero'):raise ValueError('red, black, zero 중 선택하세요')
-  r=RNG.randrange(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black';finish(s,(36 if r==0 else 2) if choice==color else 0,f'{r} · {color}')
+  r=RNG.randrange(37)
+  if win is not None:
+   matches=lambda n:('zero' if n==0 else 'red' if n in RED else 'black')==choice
+   r=RNG.choice([n for n in range(37) if matches(n)==win])
+  s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black';finish(s,(36 if r==0 else 2) if choice==color else 0,f'{r} · {color}')
  elif game=='horse':
-  number(choice,1,5);s['order']=RNG.sample(list(range(1,6)),5);finish(s,5 if s['order'][0]==choice else 0,f"{s['order'][0]}번 말 우승")
+  number(choice,1,5);s['order']=RNG.sample(list(range(1,6)),5)
+  if win is not None:
+   first=choice if win else RNG.choice([n for n in range(1,6) if n!=choice]);rest=[n for n in s['order'] if n!=first];s['order']=[first]+rest
+  finish(s,5 if s['order'][0]==choice else 0,f"{s['order'][0]}번 말 우승")
  elif game=='blackjack':
   deck=list(range(1,14))*24;RNG.shuffle(deck);s.update(deck=deck,player=[deck.pop(),deck.pop()],dealer=[deck.pop(),deck.pop()])
   p,d=total(s['player']),total(s['dealer'])
@@ -66,6 +88,9 @@ def start(game, choice=None):
  elif game=='baskin':s.update(count=0)
  elif game=='indian':s.update(player=RNG.randint(1,13),dealer=RNG.randint(1,13))
  elif game=='ttt':s.update(board=['']*9)
+ if s['done'] and s['mult']>0 and config.get('winMultiplier') is not None and game in CONFIGURABLE_CHANCE:s['mult']=config['winMultiplier']
+ s['profitScale']=config.get('profitScale',1)
+ s['winChance']=chance
  return s
 
 def action(s, act, value=None):

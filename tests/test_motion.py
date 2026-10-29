@@ -10,7 +10,7 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
    edit=AsyncMock();final=object();view=object()
    with patch('game_motion.asyncio.sleep',new_callable=AsyncMock):
     await game_motion.reveal(edit,{'game':game},final,view)
-   self.assertEqual(edit.await_count,4)
+   self.assertEqual(edit.await_count,len(game_motion.sequence({'game':game}))+1)
    self.assertIs(edit.await_args.kwargs['embed'],final)
    self.assertIs(edit.await_args.kwargs['view'],view)
    for call in edit.await_args_list[:-1]:self.assertEqual(len(call.kwargs['view'].children),0)
@@ -19,3 +19,10 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
   final=object()
   await game_motion.reveal(edit,{'game':'slots'},final,None)
   self.assertIs(edit.await_args.kwargs['embed'],final)
+
+ def test_wheel_stops_on_actual_segment_and_keeps_duration(self):
+  for target in range(8):
+   steps=game_motion.sequence({'game':'wheel','state':{'segment':target}})
+   self.assertEqual(steps[-1][0],game_motion.wheel_board(target))
+   self.assertAlmostEqual(sum(delay for _,delay in steps),10)
+   self.assertGreater(steps[-1][1],steps[0][1])
