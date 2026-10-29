@@ -1,5 +1,7 @@
 """Discord gateway worker. Run separately from app.py against the same DB_PATH."""
 import asyncio
+import sqlite3
+import logging
 import json
 import os
 import time
@@ -139,7 +141,7 @@ async def profile(i:discord.Interaction):
 async def ranking(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
  await i.response.defer()
- d=await asyncio.to_thread(core.state);text='\n'.join(f"{n+1}. {u['name']} — Lv.{u['level']} · {u['xp']:,} 띵조코인" for n,u in enumerate(d['users'][:10])) or '아직 기록이 없어요'
+ d=await asyncio.to_thread(core.leaderboard);text='\n'.join(f"{n+1}. {u['name']} — Lv.{u['level']} · {u['xp']:,} 띵조코인" for n,u in enumerate(d['users'][:10])) or '아직 기록이 없어요'
  await i.followup.send(embed=discord.Embed(title='서버 리더보드',description=text,color=0x9d85ff),allowed_mentions=discord.AllowedMentions.none())
 
 @tree.command(name='선물',description='다른 멤버에게 띵조코인을 선물해요')
@@ -250,7 +252,17 @@ async def command_error(i,error):
 @client.event
 async def on_message(message):
  if not message.guild or message.guild.id!=GUILD_ID or message.author.bot:return
- await asyncio.to_thread(core.activity,str(message.author.id),message.author.display_name,'chat',str(message.channel.id),[str(r.id) for r in message.author.roles],str(message.channel.category_id or ''),message_id=getattr(message,'id',None))
+ roles=[str(r.id) for r in getattr(message.author,'roles',[])]
+ channel=message.channel;category=getattr(channel,'category_id',None) or getattr(getattr(channel,'parent',None),'category_id','')
+ stamp=message.created_at.timestamp() if getattr(message,'created_at',None) else time.time()
+ for attempt in range(6):
+  try:
+   await asyncio.to_thread(core.activity,str(message.author.id),getattr(message.author,'display_name',str(message.author)),'chat',str(channel.id),roles,str(category or ''),stamp=stamp,message_id=getattr(message,'id',None))
+   return
+  except sqlite3.OperationalError as e:
+   if not any(word in str(e).lower() for word in ('locked','busy')) or attempt==5:
+    logging.exception('Chat reward failed: message_id=%s',message.id);raise
+   await asyncio.sleep(min(0.25*2**attempt,4))
 
 @client.event
 async def on_voice_state_update(member,before,after):
@@ -325,7 +337,7 @@ async def update_ranking(guild):
  with core.db() as c:r=c.execute("SELECT value FROM meta WHERE key='ranking'").fetchone()
  old=json.loads(r[0]) if r else {}
  if time.time()-old.get('time',0)<s['rankingInterval'] and old.get('channel')==s['rankingChannel']:return
- d=await asyncio.to_thread(core.state);text='\n'.join(f"{i+1}. {u['name']} · Lv.{u['level']} · {u['xp']:,} 띵조코인" for i,u in enumerate(d['users'][:20])) or '아직 활동 기록이 없어요'
+ d=await asyncio.to_thread(core.leaderboard);text='\n'.join(f"{i+1}. {u['name']} · Lv.{u['level']} · {u['xp']:,} 띵조코인" for i,u in enumerate(d['users'][:20])) or '아직 활동 기록이 없어요'
  ch=guild.get_channel_or_thread(int(s['rankingChannel']))
  if not ch:raise ValueError('랭킹 채널을 찾을 수 없습니다')
  embed=discord.Embed(title='서버 띵조코인 리더보드',description=text,color=int(s['embedColor'][1:],16));msg=None

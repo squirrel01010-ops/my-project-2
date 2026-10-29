@@ -115,6 +115,6 @@ class PurchaseDelivery(unittest.IsolatedAsyncioTestCase):
   def state():
    response.defer.assert_awaited_once()
    return {'users':[]}
-  with patch.object(bot,'GUILD_ID',456),patch.object(core,'state',side_effect=state):
+  with patch.object(bot,'GUILD_ID',456),patch.object(core,'leaderboard',side_effect=state):
    await bot.tree.get_command('랭킹').callback(i)
   i.followup.send.assert_awaited_once()

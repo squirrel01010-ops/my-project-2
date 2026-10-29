@@ -67,6 +67,10 @@ def init():
   CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,uid TEXT,name TEXT,csrf TEXT,expires REAL);
   CREATE TABLE IF NOT EXISTS oauth_states(hash TEXT PRIMARY KEY,expires REAL);
   ''')
+  c.execute('CREATE INDEX IF NOT EXISTS users_ranking ON users(xp DESC,id)')
+  c.execute('CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(status,id)')
+  c.execute('CREATE INDEX IF NOT EXISTS ledger_user_recent ON ledger(uid,id DESC)')
+  c.execute('CREATE INDEX IF NOT EXISTS rounds_user_status ON game_rounds(uid,status)')
   social.init(c)
   c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)',(json.dumps(DEFAULTS),))
   current=settings(c);c.execute('UPDATE settings SET data=? WHERE id=1',(json.dumps(current),))
@@ -93,25 +97,25 @@ def ident(v):
 
 def ensure(c,uid,name=None):
  uid=ident(uid);c.execute('INSERT OR IGNORE INTO users(id,name) VALUES(?,?)',(uid,(name or uid)[:80]))
- if name:c.execute('UPDATE users SET name=? WHERE id=?',(name[:80],uid))
+ if name:c.execute('UPDATE users SET name=? WHERE id=? AND name!=?',(name[:80],uid,name[:80]))
  return uid
 
 def level(xp,s):return math.isqrt(xp//s['levelBase'])
-def user(c,uid):
+def user(c,uid,s=None):
  r=c.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone()
  if not r:raise ValueError('등록되지 않은 멤버입니다')
- u=dict(r);s=settings(c);u['level']=level(u['xp'],s);u['nextXP']=(u['level']+1)**2*s['levelBase'];return u
+ u=dict(r);s=settings(c) if s is None else s;u['level']=level(u['xp'],s);u['nextXP']=(u['level']+1)**2*s['levelBase'];return u
 
 def audit(c,actor,action,detail):c.execute('INSERT INTO audit(actor,action,detail,created) VALUES(?,?,?,?)',(actor,action,json.dumps(detail,ensure_ascii=False),time.time()))
 def job(c,kind,payload):c.execute('INSERT INTO jobs(kind,payload,created) VALUES(?,?,?)',(kind,json.dumps(payload),time.time()))
-def adjust(c,uid,delta,reason,score=True):
- integer(delta,-10**12,10**12);before=user(c,uid);s=settings(c)
+def adjust(c,uid,delta,reason,score=True,s=None):
+ integer(delta,-10**12,10**12);s=settings(c) if s is None else s;before=user(c,uid,s)
  if not c.execute('UPDATE users SET xp=xp+? WHERE id=? AND xp+? BETWEEN 0 AND 1000000000000000',(delta,uid,delta)).rowcount:raise ValueError('띵조코인이 부족하거나 잔액 한도를 초과합니다')
  c.execute('INSERT INTO ledger(uid,delta,reason) VALUES(?,?,?)',(uid,delta,reason[:200]))
  if score:
   season=c.execute("SELECT id FROM seasons WHERE status='active'").fetchone()
   if season:c.execute('INSERT INTO season_scores VALUES(?,?,?) ON CONFLICT(season_id,uid) DO UPDATE SET score=score+excluded.score',(season[0],uid,delta))
- after=user(c,uid)
+ after=user(c,uid,s)
  if before['level']!=after['level']:
   job(c,'roles',dict(uid=uid))
   if after['level']>before['level']:job(c,'level',dict(uid=uid,level=after['level']))
@@ -192,7 +196,7 @@ def activity(uid,name,kind,channel,roles=(),category='',stamp=None,message_id=No
    used=c.execute("SELECT COALESCE(SUM(xp),0) FROM activity WHERE uid=? AND day=? AND kind='voice'",(uid,day)).fetchone()[0]
    xp=min(xp,max(0,s['dailyCap']-used))
   c.execute('INSERT INTO activity VALUES(?,?,?,?,1,?) ON CONFLICT(uid,day,channel,kind) DO UPDATE SET amount=amount+1,xp=xp+excluded.xp',(uid,day,str(channel),kind,xp))
-  if xp:adjust(c,uid,xp,('채팅' if kind=='chat' else '음성')+' 활동')
+  if xp:adjust(c,uid,xp,('채팅' if kind=='chat' else '음성')+' 활동',s=s)
   return xp
 
 def boosted(base,s,kind,channel='',roles=(),now=None):
@@ -344,6 +348,12 @@ def operate(actor,path,b,admin=False,context=None):
     jid=integer(b.get('job_id'),1);c.execute("UPDATE jobs SET status='pending',error='' WHERE id=? AND status='failed'",(jid,));audit(c,actor,path,dict(job=jid));return dict(ok=True)
    raise ValueError('알 수 없는 작업')
   return idempotent(c,actor,b.get('key',''),dict(path=path,body=b),work)
+
+def leaderboard(limit=20):
+ with db() as c:
+  s=settings(c);rows=[dict(r) for r in c.execute('SELECT id,name,xp FROM users ORDER BY xp DESC,id LIMIT ?',(limit,))]
+  for u in rows:u['level']=level(u['xp'],s)
+  return dict(users=rows)
 
 def state(uid=None,admin=False):
  maintenance()
