@@ -1,0 +1,16 @@
+**
+!Dockerfile
+!requirements.lock
+!app.py
+!core.py
+!games.py
+!poker.py
+!social.py
+!social_bot.py
+!bot.py
+!backup.py
+!run.py
+!runtime_health.py
+!public/
+!public/**
+!game_motion.py

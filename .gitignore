@@ -1,0 +1,22 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-*
+*.sqlite3
+backups/
+node_modules/
+
+# Credentials, deployment identity, and transfer artifacts
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.sqlite3-*
+*.zip
+*.pem
+*.key
+deploy/active-hosting.json
+*admin-login*
+private-migration*
