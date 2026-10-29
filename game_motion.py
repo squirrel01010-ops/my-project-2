@@ -18,6 +18,27 @@ SYMBOLS=['🍒','🍋','🔔','⭐','💎']
 def card(n):return '▧' if n is None else str({1:'A',11:'J',12:'Q',13:'K'}.get(n,n))
 def box(text):return '```\n'+text+'\n```'
 def cards(values):return '  '.join('['+card(n)+']' for n in values)
+def card_table(values):
+ values=list(values);rows=[]
+ for offset in range(0,len(values),5):
+  hand=values[offset:offset+5]
+  rows.extend([' '.join('┌────┐' for _ in hand),' '.join('│'+card(n).center(4)+'│' for n in hand),' '.join('└────┘' for _ in hand)])
+ return '\n'.join(rows)
+
+HINTS={
+ 'blackjack':'카드를 더 받거나, 현재 합계로 멈추세요.',
+ 'indian':'상대 카드를 보고 콜 또는 폴드를 선택하세요.',
+ 'highlow':'다음 카드가 더 높을지, 낮을지 선택하세요.',
+ 'baskin':'한 번에 1~3개. 31을 말하면 패배해요.',
+ 'ttt':'내 표시는 X · 원하는 칸을 선택하세요.',
+ 'mines':'안전한 칸을 찾아보세요. 지뢰는 3개예요.',
+ 'bomb':'전선을 선택하세요. 5개 중 1개는 폭탄이에요.',
+ 'tower':'세 발판 중 하나를 선택하세요. 두 개가 안전해요.'}
+def hint(r):
+ text=HINTS.get(r['game'],'')
+ if r['game'] in ('mines','bomb','tower','highlow') and r.get('state',{}).get('step',0)>0:text+='\n계속 도전하거나 지금 정산할 수 있어요.'
+ return text
+
 
 def grid(cells,width=3):
  return box('\n'.join('  '.join(cells[n:n+width]) for n in range(0,len(cells),width)))
@@ -28,16 +49,16 @@ def board(r):
  if g in ('coin','dice'):
   roll=s.get('roll',1);return box('       '+ '⚀⚁⚂⚃⚄⚅'[roll-1]+f'\n\n       {roll}'+(' · 홀수' if roll%2 else ' · 짝수'))
  if g=='horse':return '\n'.join(f'**{i+1}위**　{n}번 말' for i,n in enumerate(s.get('order',[])))
- if g=='blackjack':return box('DEALER   '+cards(s.get('dealer',[None,None]))+'\n\nPLAYER   '+cards(s.get('player',[None,None])))
- if g=='indian':return box('상대     '+cards([s.get('dealer')])+'\n\n나       '+cards([s.get('player')]))
- if g=='highlow':return box(('이전  ['+card(s['previous'])+']    →    ' if 'previous' in s else '')+'현재  ['+card(s.get('card'))+']')
+ if g=='blackjack':return box('DEALER\n'+card_table(s.get('dealer',[None,None]))+'\n\nPLAYER · '+str(games.total(s.get('player',[])))+'\n'+card_table(s.get('player',[None,None])))
+ if g=='indian':return box('상대 카드\n'+card_table([s.get('dealer')])+'\n\n내 카드\n'+card_table([s.get('player')]))
+ if g=='highlow':return box(('이전  '+card(s['previous'])+'  →  ' if 'previous' in s else '')+'현재 카드\n'+card_table([s.get('card')]))
  if g=='baskin':
   count=s.get('count',0);return box(f'현재 숫자     {count} / 31\n\n'+''.join('■' if n<count else '·' for n in range(31)))
  if g=='ttt':return grid([v or str(n+1) for n,v in enumerate(s.get('board',['']*9))])
  if g in ('mines','bomb'):
   opened=s.get('opened',[]);hazards=s.get('hazards',[]) if done else []
   cells=[('×' if n in hazards else '◆' if n in opened else str(n+1)) for n in range(9 if g=='mines' else 5)]
-  return grid(cells,3 if g=='mines' else 5)
+  return grid(['['+v+']' for v in cells],3 if g=='mines' else 5)
  if g=='tower':
   step=s.get('step',0);return box('\n'.join(f'{n+1}층  '+('  ◆  ' if n<step else '[1] [2] [3]')+('  ◀ 현재' if n==step and step<6 else '') for n in reversed(range(6))))
  return ''
@@ -104,9 +125,10 @@ def sequence(r):
 async def reveal(edit,r,final_embed,final_view):
  try:
   for frame,delay in sequence(r):
-   e=discord.Embed(title=('🎡 돌림판이 돌아가고 있어요…' if r['game']=='wheel' else games.CATALOG[r['game']][0]),description=(f"👤 {r.get('display_name','참가자')} · 🪙 {r.get('bet',0):,} EXP\n\n"+frame),color=0xf1c40f if r['game'] in ('wheel','roulette') else 0x7289da)
+   e=discord.Embed(title=('🎡 돌림판이 돌아가고 있어요…' if r['game']=='wheel' else games.CATALOG[r['game']][0]),description=(f"👤 {r.get('display_name','참가자')} · 🪙 {r.get('bet',0):,} EXP\n\n"+frame),color=0xf1c40f if r['game'] in ('wheel','roulette') else 0x8bdcc6)
    if r['game'] not in ('wheel','roulette'):
     e.title=games.CATALOG[r['game']][0];e.description=frame
+    e.set_author(name='STELLAR / PLAY')
     e.set_footer(text=f"{r.get('display_name','참가자')} · 베팅 {r.get('bet',0):,} EXP")
    else:e.set_footer(text='행운을 빌어요!')
    await edit(embed=e,view=discord.ui.View(timeout=None))

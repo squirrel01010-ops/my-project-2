@@ -40,20 +40,24 @@ async def decorate_round(i,r):
 def game_embed(r):
  s=r['state'];done=r['status']=='done';net=r.get('payout',0)-r['bet']
  if r['game'] not in ('roulette','wheel'):
-  result='승리' if net>0 else '패배' if net<0 else '무승부'
-  title=games.CATALOG[r['game']][0]+(' · '+result if done else '')
-  e=discord.Embed(title=title,description=game_motion.board(r),color=(0x57b894 if net>0 else 0xd66b78 if net<0 else 0x8b94a8) if done else 0x7289da)
-  e.add_field(name='베팅',value=f"{r['bet']:,} EXP")
-  if done:e.add_field(name='정산',value=f"**{net:+,} EXP**\n반환 {r['payout']:,} EXP")
-  elif s.get('mult',0):
+  result='WIN' if net>0 else 'LOSS' if net<0 else 'DRAW'
+  e=discord.Embed(title=games.CATALOG[r['game']][0],color=(0x8bdcc6 if net>0 else 0xe79aab if net<0 else 0x9aaebc) if done else 0x8bdcc6)
+  e.set_author(name='STELLAR / '+(result if done else 'PLAY'))
+  e.description=game_motion.board(r)
+  if done:e.description+=f"\n**{'+' if net>0 else ''}{net:,} EXP** · "+('획득' if net>0 else '손실' if net<0 else '원금 반환')
+  else:e.description+='\n'+game_motion.hint(r)
+  e.add_field(name='베팅',value=f"**{r['bet']:,}** EXP",inline=True)
+  if done:e.add_field(name='총 반환',value=f"**{r['payout']:,}** EXP",inline=True)
+  elif s.get('mult',0) and s.get('step',0)>0:
    mult=s['mult'];mult=1+(mult-1)*s.get('profitScale',1) if mult>1 else mult
-   e.add_field(name='현재 배당',value=f"**×{mult:.2f}**")
-  if 'balance' in r:e.add_field(name='잔액',value=f"{r['balance']:,} EXP")
-  if s.get('message'):e.add_field(name='결과' if done else '진행 상황',value=s['message'],inline=False)
-  footer=[r.get('display_name','게임')]
+   raw=int(r['bet']*mult);payout=raw-max(0,raw-r['bet'])*r.get('fee',0)//100
+   e.add_field(name='지금 정산하면',value=f"**{payout:,}** EXP · ×{mult:.2f}",inline=True)
+  if 'balance' in r:e.add_field(name='보유 포인트',value=f"**{r['balance']:,}** EXP",inline=True)
+  if done and s.get('message'):e.add_field(name='게임 결과',value=s['message'],inline=False)
+  footer=[r.get('display_name','플레이어')]
   if s.get('winChance') is not None:footer.append(f"당첨 확률 {s['winChance']:g}%")
   if s.get('profitScale',1)!=1:footer.append(f"승리 수익 ×{s['profitScale']:g}")
-  if not done:footer.append('아래 버튼으로 선택하세요')
+  if not done:footer.append('아래 버튼으로 선택')
   e.set_footer(text=' · '.join(footer));return e
  e=discord.Embed(title=games.CATALOG[r['game']][0],color=(0x2ecc71 if net>=0 else 0xe74c3c) if done else 0x9d85ff)
  if r['game']=='wheel' and done:e.title=f"🎡 돌림판 → ×{s.get('wheelMultipliers',[0,0,0,0,1,1,2,4])[s['segment']]} 당첨!"
@@ -85,17 +89,17 @@ def game_view(r):
  if g=='blackjack':controls=[('카드 받기','hit',''),('멈추기','stand','')]
  elif g=='indian':controls=[('콜','call',''),('폴드','fold','')]
  elif g=='highlow':
-  controls=([('높음','higher','')] if s['card']<13 else [])+([('낮음','lower','')] if s['card']>1 else [])+[('정산','cashout','')]
+  controls=([('높음','higher','')] if s['card']<13 else [])+([('낮음','lower','')] if s['card']>1 else [])+[('지금 정산','cashout','')]
  elif g=='baskin':controls=[(str(n)+'개 세기','count',str(n)) for n in (1,2,3)]
  elif g in ('mines','bomb','tower','ttt'):
   n={'mines':9,'bomb':5,'tower':3,'ttt':9}[g]
   controls=[(str(n+1),'pick',str(n)) for n in range(n)]
-  if g!='ttt':controls.append(('정산','cashout',''))
+  if g!='ttt':controls.append(('지금 정산','cashout',''))
  for label,act,value in controls:
   used=act=='pick' and ((g in ('mines','bomb') and int(value) in s['opened']) or (g=='ttt' and bool(s['board'][int(value)])))
   if used:label=s['board'][int(value)] if g=='ttt' else '◆'
-  row=(int(value)//3 if act=='pick' else 3) if g in ('mines','ttt') else None
-  view.add_item(discord.ui.Button(label=label,custom_id=f"orbit:{r['id']}:{r['revision']}:{act}:{value}",disabled=used,row=row,style=discord.ButtonStyle.primary if act=='cashout' else discord.ButtonStyle.secondary))
+  row=(int(value)//3 if act=='pick' else 3) if g in ('mines','ttt') else (0 if act=='pick' else 1) if g in ('bomb','tower') else None
+  view.add_item(discord.ui.Button(label=label,custom_id=f"orbit:{r['id']}:{r['revision']}:{act}:{value}",disabled=used or (act=='cashout' and s.get('step',0)<1),row=row,style=discord.ButtonStyle.success if act=='cashout' else discord.ButtonStyle.primary if act in ('hit','call','higher','count') else discord.ButtonStyle.secondary))
  return view
 
 @client.event

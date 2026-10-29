@@ -8,7 +8,9 @@ class GameDisplay(unittest.TestCase):
   self.assertIn('1.59',text)
  def test_solo_symbols_and_cards_are_readable(self):
   r=dict(game='slots',bet=10,status='done',payout=0,state=dict(symbols=[0,1,2]))
-  self.assertEqual(bot.game_embed(r).description,'🍒　│　🍋　│　🔔')
+  self.assertIn('🍒　│　🍋　│　🔔',bot.game_embed(r).description)
+  self.assertIn('-10 EXP',bot.game_embed(r).description)
   r.update(game='blackjack',state=dict(player=[1,13],dealer=[10,None]),status='active')
   e=bot.game_embed(r)
-  self.assertIn('[A]  [K]',e.description);self.assertIn('[10]  [▧]',e.description)
+  self.assertIn('│ A  │',e.description);self.assertIn('│ K  │',e.description)
+  self.assertIn('│ 10 │',e.description);self.assertIn('│ ▧  │',e.description)

@@ -19,7 +19,7 @@ class HTTP(unittest.TestCase):
  def request(self,path,body=None,headers=None):
   c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None,headers or {});r=c.getresponse();raw=r.read();result=(r.status,raw,dict(r.getheaders()));c.close();return result
  def test_static_and_security_headers(self):
-  status,raw,headers=self.request('/');self.assertEqual(status,200);self.assertIn(b'ORBIT',raw);self.assertIn('Content-Security-Policy',headers)
+  status,raw,headers=self.request('/');self.assertEqual(status,200);self.assertIn(b'STELLAR',raw);self.assertIn('Content-Security-Policy',headers)
  def test_unauthenticated_and_cross_origin_denied(self):
   self.assertEqual(self.request('/api/state')[0],403)
   self.assertEqual(self.request('/api/adjust',dict(id='333',amount=10,key='x'),{'Authorization':'Bearer test-only-token','Origin':'https://evil.invalid'})[0],403)

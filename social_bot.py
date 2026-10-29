@@ -20,31 +20,55 @@ STATUS={'lobby':'참가자 모집 중','active':'게임 진행 중','open':'복�
 STREET={'preflop':'첫 베팅','flop':'플롭','turn':'턴','river':'리버'}
 
 def embed(s):
- kind=s['kind'];e=discord.Embed(title=social.CATALOG[kind]['name'],color=0xa28aff)
+ kind=s['kind'];done=s['status']=='done'
+ e=discord.Embed(title=social.CATALOG[kind]['name'],color=0x8bdcc6)
+ e.set_author(name='STELLAR / '+{'holdem':'CARD TABLE','lottery':'DAILY LOTTERY','crash':'CRASH'}[kind])
  if kind=='holdem':
-  e.description=f"바이인 **{s['buyin']:,} EXP** · SB/BB **{max(1,s['blind']//2)}/{s['blind']}**\n상태: **{STATUS.get(s['status'],'준비 중')}**"
-  if s['status']=='lobby':e.description+=f"\n모집 마감 <t:{int(s['lobby_end'])}:R> · 2명 이상이면 자동 시작"
+  if s['status']=='lobby':
+   e.description=f"**자리를 골라 함께 시작하세요.**\n참가자 **{len(s['players'])} / 6명** · 모집 마감 <t:{int(s['lobby_end'])}:R>"
   else:
-   e.add_field(name='공용 카드',value=' '.join(s.get('board',[])) or '🂠 🂠 🂠 🂠 🂠',inline=False)
-   e.add_field(name='팟',value=f"{sum(p.get('total',0) for p in s['players']):,} EXP · {STREET.get(s.get('street'),'')}")
-   if s['status']=='active':e.add_field(name='현재 차례',value=f"{s['players'][s['turn']]['name']} · <t:{int(s['deadline'])}:R>")
-  for p in s['players']:
-   cards=' '.join(p.get('cards',[]));line=f"남은 칩 {p['stack']:,} · 이번 라운드 {p.get('round',0):,}"+(' · 폴드' if p.get('folded') else '')
-   if s['status']=='done':line+=f"\n반환 {s['payouts'].get(p['uid'],0):,} EXP · {s.get('hands',{}).get(p['uid'],'')}"
-   e.add_field(name=p['name'][:100],value=f'{cards}\n{line}',inline=False)
-  e.set_footer(text='내 패는 [내 카드]에서만 비공개 확인 · 턴 초과 시 가능하면 체크, 아니면 폴드')
- elif kind=='lottery':
-  e.description=f"🎟 1장 **{s['price']:,} EXP** · 1인 최대 {s['max_tickets']}장\n추첨 <t:{int(s['draw_at'])}:F>\n기본상금 **{s.get('base_prize',0):,} EXP**\n총 상금 **{s.get('base_prize',0)+s['pot']+s['rollover']:,} EXP** (이번 판매분 수수료 {s['fee']}%)"
-  if s['status']=='done':e.add_field(name='당첨 번호',value=' · '.join(map(str,s['winning'])));e.add_field(name='결과',value=f"당첨권 {len(s['winners'])}장 · 지급 {s['paid']:,} EXP")
-  e.set_footer(text='1~20 중 서로 다른 3개 · 모두 일치하면 당첨 · 당첨자가 없으면 이월')
- else:
-  e.description=(f"🚀 출발 <t:{int(s['starts'])}:R>" if s['status']=='lobby' else f"{'💥 종료' if s['status']=='done' else '🚀 비행 중'} **{(s.get('crash',s['multiplier']) if s['status']=='done' else s['multiplier']):.2f}배**")
+   board=s.get('board',[])
+   e.description='**공용 카드**\n```\n'+'  '.join('['+c+']' for c in board+['?']*(5-len(board)))+'\n```'
+   e.add_field(name='테이블 팟',value=f"**{sum(p.get('total',0) for p in s['players']):,}** EXP",inline=True)
+   e.add_field(name='라운드',value=STREET.get(s.get('street'),'정산 완료' if done else '준비'),inline=True)
+   if s['status']=='active':e.description+=f"\n**{discord.utils.escape_markdown(s['players'][s['turn']]['name'])}** 님 차례 · <t:{int(s['deadline'])}:R>"
+  e.add_field(name='바이인',value=f"{s['buyin']:,} EXP",inline=True)
+  e.add_field(name='블라인드',value=f"{max(1,s['blind']//2):,} / {s['blind']:,}",inline=True)
   lines=[]
-  for p in s['players'][:25]:
-   status=f"✅ {p.get('at',0):.2f}배 · 반환 {p['payout']:,}" if p['status']=='cashed' else '💥 패배' if p['status']=='lost' else f"자동 {p['auto']/100:.2f}배" if p['auto'] else '수동 정산'
-   lines.append(f"{p['name'][:30]} · {p['bet']:,} EXP · {status}")
-  e.add_field(name=f"참가자 {len(s['players'])}명",value='\n'.join(lines)[:1024] or '모집 중',inline=False)
-  e.set_footer(text='화면 자동 갱신 · 목표 배당에서 자동 정산할 수 있어요.')
+  for p in s['players']:
+   name=discord.utils.escape_markdown(p['name'][:30]);status='폴드' if p.get('folded') else '올인' if p['stack']==0 else '참가'
+   if done:line=f"**{name}** · 반환 {s['payouts'].get(p['uid'],0):,} EXP\n{' '.join(p.get('cards',[]))} · {s.get('hands',{}).get(p['uid'],'')}"
+   else:line=f"**{name}** · {p['stack']:,} 칩 · {status}"
+   lines.append(line)
+  e.add_field(name='플레이어',value='\n'.join(lines)[:1024] or '첫 참가자를 기다리고 있어요.',inline=False)
+  e.set_footer(text='내 패는 [내 카드]에서 비공개로 확인하세요.')
+ elif kind=='lottery':
+  pool=s.get('base_prize',0)+s['pot']+s['rollover']-s['pot']*s['fee']//100
+  if done:
+   e.description='**오늘의 당첨 번호**\n```\n'+'    '.join(f'{n:02d}' for n in s['winning'])+'\n```'
+   e.add_field(name='당첨 복권',value=f"{len(s['winners'])}장",inline=True)
+   e.add_field(name='총 지급',value=f"**{s['paid']:,}** EXP",inline=True)
+  else:
+   e.description=f"이번 회차 총상금\n**{pool:,} EXP**\n\n추첨 <t:{int(s['draw_at'])}:F>"
+   e.add_field(name='기본 상금',value=f"{s.get('base_prize',0):,} EXP",inline=True)
+   e.add_field(name='이월 상금',value=f"{s['rollover']:,} EXP",inline=True)
+   e.add_field(name='한 장 가격',value=f"{s['price']:,} EXP",inline=True)
+   e.add_field(name='참여 방법',value=f"1~20 중 서로 다른 **3개 번호**를 골라요.\n모두 맞히면 당첨 · 1인 최대 {s['max_tickets']}장",inline=False)
+  e.set_footer(text='판매금 수수료 반영 · 당첨자가 없으면 다음 회차로 이월')
+ else:
+  multiplier=s.get('crash',s['multiplier']) if done else s['multiplier']
+  if s['status']=='lobby':e.description=f"**곧 출발해요.**\n출발 <t:{int(s['starts'])}:R>\n아래 참가 버튼에서 베팅과 자동 정산을 설정하세요."
+  else:
+   e.description=f"```\n       {multiplier:.2f} ×\n```\n"+('**CRASH · 비행 종료**' if done else '**상승 중** · 멈추기 전에 정산하세요.')
+   if done:e.color=0xe79aab
+  lines=[]
+  for p in s['players'][:15]:
+   status=f"**{p.get('at',0):.2f}× 정산** · {p['payout']:,} EXP" if p['status']=='cashed' else '미정산 · 패배' if p['status']=='lost' else f"자동 {p['auto']/100:.2f}×" if p['auto'] else '수동 정산'
+   lines.append(f"{discord.utils.escape_markdown(p['name'][:24])} · {p['bet']:,} EXP\n{status}")
+  body='\n\n'.join(lines) or '첫 참가자를 기다리고 있어요.'
+  if len(s['players'])>15:body+=f"\n외 {len(s['players'])-15}명"
+  e.add_field(name=f"참가자 {len(s['players'])}명",value=body[:1024],inline=False)
+  e.set_footer(text='2초마다 자동 갱신 · 자동 정산은 설정한 배율에서 실행')
  return e
 
 def view(s):
@@ -58,7 +82,7 @@ def view(s):
   if s['status']=='lobby':controls=[('참가','join')]
   elif s['status']=='flying':controls=[('지금 정산','cashout')]
  if kind!='crash':controls.append(('새로고침','refresh'))
- for label,action in controls:v.add_item(discord.ui.Button(label=label,custom_id=f"social:{kind}:{rid}:{action}:{s.get('revision',0)}",style=discord.ButtonStyle.primary if action in ('cashout','join','auto') else discord.ButtonStyle.secondary))
+ for label,action in controls:v.add_item(discord.ui.Button(label=label,custom_id=f"social:{kind}:{rid}:{action}:{s.get('revision',0)}",style=discord.ButtonStyle.success if action=='cashout' else discord.ButtonStyle.primary if action in ('join','auto','start') else discord.ButtonStyle.secondary))
  return v
 
 async def bind_message(s,message):
@@ -124,7 +148,7 @@ async def handle(i):
  return True
 
 async def refresh_live_message(row):
- s=json.loads(row['state']);public=social.public(s);finger='auto-display-v3:'+json.dumps(public,sort_keys=True)
+ s=json.loads(row['state']);public=social.public(s);finger='stellar-display-v4:'+json.dumps(public,sort_keys=True)
  key='live-view:'+row['id']
  with core.db() as c:old=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone()
  if old and old[0]==finger:return
