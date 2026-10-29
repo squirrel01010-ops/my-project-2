@@ -76,7 +76,7 @@ def game_embed(r):
  else:e.description=game_motion.board(r)
  if s.get('message'):e.description+='\n'+s['message']
  if done:
-  e.add_field(name=('📉 손실' if r['payout']<r['bet'] else '💰 수익')+f" (수수료 {r.get('fee',0)}%)",value=f"**{r['payout']-r['bet']:+,}** 띵조코인",inline=True)
+  e.add_field(name=('📉 손실' if r['payout']<r['bet'] else f"💰 수익 (수수료 {r.get('fee',0)}%)"),value=f"**{r['payout']-r['bet']:+,}** 띵조코인",inline=True)
  else:e.add_field(name='베팅',value=f"{r['bet']:,} 띵조코인",inline=True)
  if r.get('uid'):
   with core.db() as c:balance=core.user(c,r['uid'])['xp']

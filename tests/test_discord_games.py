@@ -28,7 +28,7 @@ class DiscordGames(unittest.IsolatedAsyncioTestCase):
       i.id=serial;i.type=bot.discord.InteractionType.component;i.data={'custom_id':b.custom_id};i.followup=SimpleNamespace(send=AsyncMock())
       await bot.on_interaction(i)
       self.assertFalse(i.followup.send.called,game)
-     self.assertIn(('📉 손실' if r['payout']<r['bet'] else '💰 수익')+f" (수수료 {r['fee']}%)",[f.name for f in embed.fields],game)
+     self.assertIn(('📉 손실' if r['payout']<r['bet'] else f"💰 수익 (수수료 {r['fee']}%)"),[f.name for f in embed.fields],game)
      self.assertNotIn('수수료',[f.name for f in embed.fields],game)
      self.assertEqual(embed.fields[-1].name,'🪙 보유 코인')
  def test_commands_require_choices_and_validate_ranges(self):

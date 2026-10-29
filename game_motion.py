@@ -48,12 +48,25 @@ def hint(r):
 def grid(cells,width=3):
  return box('\n'.join('  '.join(cells[n:n+width]) for n in range(0,len(cells),width)))
 
+RACE_LENGTH=24
+RACE_TICKS=24
+
+def horse_position(order,horse,tick):
+ return min(RACE_LENGTH,max(0,tick)*RACE_LENGTH//(20+order.index(horse)))
+
+def horse_track(order,tick):
+ lines=[]
+ for horse in range(1,6):
+  pos=horse_position(order,horse,tick)
+  lines.append(f'{horse} '+ '·'*pos+'🐎'+'·'*(RACE_LENGTH-pos)+'🏁')
+ return box('START → FINISH\n\n'+'\n'.join(lines))
+
 def board(r):
  g=r['game'];s=r.get('state',{});done=r.get('status')=='done'
  if g in ('slots','scratch'):return '　│　'.join(SYMBOLS[n] for n in s.get('symbols',[0,1,2]))
  if g in ('coin','dice'):
   roll=s.get('roll',1);return box('       '+ '⚀⚁⚂⚃⚄⚅'[roll-1]+f'\n\n       {roll}'+(' · 홀수' if roll%2 else ' · 짝수'))
- if g=='horse':return '\n'.join(f'**{i+1}위**　{n}번 말' for i,n in enumerate(s.get('order',[])))
+ if g=='horse':return horse_track(s.get('order',[1,2,3,4,5]),RACE_TICKS)+'\n'+'\n'.join(f'**{i+1}위**　{n}번 🐎' for i,n in enumerate(s.get('order',[])))
  if g=='blackjack':return box('DEALER\n'+card_table(s.get('dealer',[None,None]))+'\n\nPLAYER · '+str(games.total([n for n in s.get('player',[]) if n is not None]))+'\n'+card_table(s.get('player',[None,None])))
  if g=='indian':return box('상대 카드\n'+card_table([s.get('dealer')])+'\n\n내 카드\n'+card_table([s.get('player')]))
  if g=='highlow':return box(('이전  '+card(s['previous'])+'  →  ' if 'previous' in s else '')+'현재 카드\n'+card_table([s.get('card')]))
@@ -91,12 +104,6 @@ def staged_sequence(r):
   elif game in ('coin','dice'):
    face=s.get('roll',1) if t==7 else (t*3+t//2)%6+1
    text=box(' '*((t%3)*3+2)+'⚀⚁⚂⚃⚄⚅'[face-1]+('\n'+ ' '*((t%3)*3+2)+'╱' if t<5 else ''))+'\n'+('주사위가 멈췄어요' if t==7 else '주사위 굴리는 중')
-  elif game=='horse':
-   order=s.get('order',[1,2,3,4,5]);lines=[]
-   for n in range(1,6):
-    rank=order.index(n);pos=min(12,max(0,int(progress*(12-rank))+(0 if t==7 else ((t+n)%3-1))))
-    lines.append(str(n)+'  '+ '─'*pos+'▶'+'·'*(12-pos)+'┃')
-   text=box('START                 FINISH\n\n'+'\n'.join(lines))+'\n'+('결승선 통과' if t==7 else f'경주 진행  {int(progress*100)}%')
   elif game in ('blackjack','indian','highlow'):
    if game=='blackjack':
     player=s.get('player',[None,None]);dealer=s.get('dealer',[None,None]);previous=r.get('previous_state',{});visible=max(len(previous.get('player',[])),t-1)
@@ -164,15 +171,13 @@ def card_sequence(r):
  return [(frame,DURATION[g]/len(out)) for frame in out]
 
 def sequence(r):
+ if r['game']=='horse':
+  order=r.get('state',{}).get('order',[1,2,3,4,5])
+  return [(horse_track(order,tick),DURATION['horse']/(RACE_TICKS+1)) for tick in range(RACE_TICKS+1)]+[(board(r),1)]
  if r['game'] in ('blackjack','indian','highlow') and 'previous_state' in r:return card_sequence(r)
  if r['game'] not in ('wheel','roulette'):
   out=staged_sequence(r)
-  if r['game']=='horse':
-   order=r.get('state',{}).get('order',[1,2,3,4,5])
-   for n in range(1,6):
-    out.append((box('\n'.join(str(h)+'  '+('─'*12+'┃ ▶' if h in order[:n] else '─'*(12-order.index(h))+'▶') for h in range(1,6))),.7))
-   out.append((board(r),1.5))
-  elif out:out[-1]=(board(r),out[-1][1])
+  if out:out[-1]=(board(r),out[-1][1])
   return out
  state=r.get('state',{});size=8 if r['game']=='wheel' else 37
  target=state.get('segment',0) if r['game']=='wheel' else ROULETTE_RING.index(state.get('roll',0))
@@ -188,4 +193,3 @@ async def reveal(edit,r,final_embed,final_view):
   pass
  finally:
   await edit(embed=final_embed,view=final_view)
-

@@ -12,3 +12,15 @@ class GameDisplay(unittest.TestCase):
   r.update(game='blackjack',state=dict(player=[1,13],dealer=[10,None]),status='active')
   e=bot.game_embed(r)
   self.assertIn('│ A  │',e.description);self.assertIn('│ K  │',e.description);self.assertIn('│ ▧  │',e.description)
+
+ def test_loss_omits_fee_and_keeps_signed_amount(self):
+  r=dict(game='slots',bet=100,status='done',payout=50,fee=15,state=dict(symbols=[0,0,1],mult=0.5))
+  e=bot.game_embed(r)
+  self.assertEqual(e.fields[0].name,'📉 손실')
+  self.assertIn('-50',e.fields[0].value)
+  self.assertNotIn('수수료',json.dumps(e.to_dict(),ensure_ascii=False))
+  r['payout']=200
+  e=bot.game_embed(r)
+  self.assertIn('수수료 15%',e.fields[0].name)
+  self.assertIn('+100',e.fields[0].value)
+  self.assertNotIn('수수료',social_bot.profit_text(-50,15))

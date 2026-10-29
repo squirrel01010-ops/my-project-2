@@ -31,3 +31,20 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
     index=s['segment'] if game=='wheel' else game_motion.ROULETTE_RING.index(s['roll'])
     self.assertEqual(seq[-1][0],game_motion.spin_frame(r,index))
     self.assertGreater(seq[-1][1],seq[0][1])
+
+class HorseMotion(unittest.TestCase):
+ def test_every_finishing_order_moves_forward_on_24_cell_track(self):
+  import itertools,re
+  for order in itertools.permutations(range(1,6)):
+   r=dict(game='horse',state=dict(order=list(order)),status='done')
+   positions={h:[] for h in order}
+   for text,_ in game_motion.sequence(r):
+    lanes=re.findall(r'^([1-5]) (·*)🐎(·*)🏁$',text,re.M)
+    self.assertEqual([int(h) for h,_,_ in lanes],[1,2,3,4,5])
+    for h,before,after in lanes:
+     self.assertEqual(len(before)+len(after),24)
+     positions[int(h)].append(len(before))
+   for path in positions.values():
+    self.assertEqual(path,sorted(path));self.assertEqual(path[0],0);self.assertEqual(path[-1],24)
+   finish=sorted(order,key=lambda h:positions[h].index(24))
+   self.assertEqual(finish,list(order))
