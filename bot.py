@@ -517,6 +517,28 @@ async def weekly_command(i:discord.Interaction):
  for k,title in [('chat','💬 채팅'),('attendance','📅 출석'),('games','🎲 개인 게임 순수익')]:e.add_field(name=title,value='\n'.join(f"{n+1}. {u['name'][:40]} · {u['score']:+,}" for n,u in enumerate(r['rankings'][k][:10])) or '아직 기록이 없어요',inline=False)
  await i.followup.send(embed=e,allowed_mentions=discord.AllowedMentions.none())
 
+@tree.command(name='채팅확인',description='이 채널의 채팅 보상·수신·지급 상태를 확인해요')
+async def chat_check(i:discord.Interaction):
+ if i.guild_id!=GUILD_ID:raise PermissionError('지정된 서버에서 사용하세요')
+ await i.response.defer(ephemeral=True)
+ r=await asyncio.to_thread(core.chat_diagnostic,str(i.user.id),str(i.channel_id),[str(x.id) for x in getattr(i.user,'roles',[])])
+ me=i.guild.me;can_read=bool(me and i.channel.permissions_for(me).view_channel)
+ e=discord.Embed(title='💬 채팅 지급 확인',color=0x9d85ff)
+ if not can_read:reason='봇에게 이 채널의 채널 보기 권한이 없습니다. 채널 설정에서 봇 역할의 채널 보기를 허용하세요.'
+ elif r['expected']==0:reason='현재 설정으로 채팅 보상이 0입니다. 웹 서버 설정의 채팅 띵조코인과 적용 중인 배율을 확인하세요.'
+ elif r['pending']:reason='내 메시지가 지급 대기 중입니다. 아래 오류와 대기 건수로 원인을 확인할 수 있어요.'
+ elif not r['messages']:reason='오늘 이 채널에서 내 채팅을 처리한 기록이 없습니다. 일반 채팅을 한 줄 보낸 뒤 이 명령어를 다시 실행하세요.'
+ else:reason='이 채널의 채팅 지급 기록이 있습니다. 아래 누적 지급과 최근 지급을 확인하세요.'
+ e.description=reason
+ e.add_field(name='채널 접근',value='가능' if can_read else '불가')
+ e.add_field(name='메시지당 보상',value=f"기본 {r['base']:,} · 배율 적용 {r['expected']:,} 띵조코인")
+ e.add_field(name='오늘 이 채널에서 내 기록',value=f"{r['messages']}개 처리 · +{r['coins']:,} 띵조코인",inline=False)
+ e.add_field(name='내 지급 대기',value=f"{r['pending']}건 · {r['error'] or '오류 기록 없음'}",inline=False)
+ e.add_field(name='서버 마지막 채팅 수신',value=f"<t:{int(r['received'])}:R>" if r['received'] else '수신 기록 없음')
+ e.add_field(name='내 마지막 채팅 지급',value=f"+{r['paid']['delta']:,} · {r['paid']['created']} UTC" if r['paid'] else '지급 기록 없음',inline=False)
+ e.set_footer(text='명령어 입력 자체는 일반 채팅 집계에 포함되지 않습니다. 진단 v1')
+ await i.followup.send(embed=e,ephemeral=True)
+
 social_bot.register(client,tree,GUILD_ID)
 # A temporary database lock must not permanently stop rewards or liveness tasks.
 for background in (sync_commands,heartbeat_tick,chat_recovery,worker,voice_tick,reconcile,social_bot.live_updates):

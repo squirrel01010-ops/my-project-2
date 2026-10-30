@@ -644,3 +644,13 @@ def insights(uid,admin=False,period='week',game=''):
    for row in result['returns']:
     row['expected']=games.odds_preview(s,row['game'],None,100)
   return result
+
+
+def chat_diagnostic(uid,channel,roles=()):
+ with db() as c:
+  s=settings(c);h=dict(c.execute('SELECT * FROM chat_health WHERE id=1').fetchone())
+  pending=c.execute("SELECT COUNT(*) FROM chat_inbox WHERE status!='paid' AND json_extract(payload,'$.uid')=?",(uid,)).fetchone()[0]
+  error=c.execute("SELECT last_error FROM chat_inbox WHERE status!='paid' AND json_extract(payload,'$.uid')=? AND last_error!='' ORDER BY updated DESC LIMIT 1",(uid,)).fetchone()
+  paid=c.execute("SELECT delta,created FROM ledger WHERE uid=? AND reason='채팅 활동' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
+  count=c.execute("SELECT COALESCE(SUM(amount),0),COALESCE(SUM(xp),0) FROM activity WHERE uid=? AND channel=? AND kind='chat' AND day=?",(uid,channel,str(today(s)))).fetchone()
+  return dict(base=s['chatXP'],expected=boosted(s['chatXP'],s,'chat',channel,roles),received=h['last_received'],pending=pending,error=error[0] if error else '',paid=dict(paid) if paid else None,messages=count[0],coins=count[1])
