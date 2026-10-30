@@ -142,7 +142,7 @@ SPIN_DELAYS=[.5,.5,.6,.6,.7,.8,.9,1,1.2,1.4,1.7,2,2.4]
 def spin_frame(r,index):
  if r['game']=='wheel':
   payouts=r.get('state',{}).get('wheelMultipliers',[0,0,0,0,1,1,2,4])
-  return '\n'.join(('➜ **' if n==index else '　')+games.multiplier_badge(m)+('**' if n==index else '') for n,m in enumerate(payouts))
+  return '\n'.join(('➜ **' if n==index else '　')+games.wheel_badge(m,n)+('**' if n==index else '') for n,m in enumerate(payouts))
  rows=[]
  for offset in range(-2,3):
   n=ROULETTE_RING[(index+offset)%37];color='🟢' if n==0 else '🔴' if n in games.RED else '⚫'

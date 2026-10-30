@@ -21,6 +21,9 @@ CATALOG = {
  'tower': ('타워', '층마다 3칸 중 안전한 칸 2개. 최대 6층, 정산 가능', True),
  'horse': ('경마', '말 5마리 · 추첨 비중은 서버 설정 적용. 선택한 말이 우승하면 5배', False),
 }
+WHEEL_ICONS=['🍒','🍋','🍇','🍀','🔔','⭐','💎','👑']
+def wheel_badge(mult,index):return f'{WHEEL_ICONS[index]} {mult:g}배'
+
 MULTIPLIER_ICONS={0:'💨',1:'🪙',2:'💎',4:'👑',36:'🌟'}
 def multiplier_badge(mult):return f"{MULTIPLIER_ICONS.get(mult,'✨')} {mult:g}배"
 
@@ -88,7 +91,7 @@ def start(game, choice=None, config=None):
   n=4;s['symbols']=[draw(n) for _ in range(3)]
   finish(s,n*n if len(set(s['symbols']))==1 else 0,'세 칸 일치!' if len(set(s['symbols']))==1 else '다음 기회에')
  elif game=='wheel':
-  s['wheelMultipliers']=list(config.get('wheelMultipliers',[0,0,0,0,1,1,2,4]));s['segment']=draw(8);m=s['wheelMultipliers'][s['segment']];finish(s,m,f'{multiplier_badge(m)} 칸에 멈췄어요')
+  s['wheelMultipliers']=list(config.get('wheelMultipliers',[0,0,0,0,1,1,2,4]));s['segment']=draw(8);m=s['wheelMultipliers'][s['segment']];finish(s,m,f'{wheel_badge(m,s['segment'])} 칸에 멈췄어요')
  elif game=='roulette':
   if choice not in ('red','black','zero'):raise ValueError('red, black, zero 중 선택하세요')
   r=draw(37);s['roll']=r;color='zero' if r==0 else 'red' if r in RED else 'black'
