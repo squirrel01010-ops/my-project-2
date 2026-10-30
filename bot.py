@@ -18,11 +18,12 @@ import game_motion
 
 GUILD_ID=int(os.getenv('DISCORD_GUILD_ID','0'))
 intents=discord.Intents.default();intents.members=True;intents.voice_states=True;intents.messages=True
-client=discord.Client(intents=intents, proxy=os.getenv("HTTPS_PROXY") or None)
+client=discord.Client(intents=intents, enable_debug_events=True, proxy=os.getenv("HTTPS_PROXY") or None)
 tree=app_commands.CommandTree(client)
 voice_candidates=set()
 GAME_ICONS=dict(baccarat='🃏',coin='🪙',dice='🎲',baskin='🍦',scratch='🎟️',slots='🎰',wheel='🎡',mines='💎',highlow='🃏',blackjack='♠️',roulette='🔴',indian='🪶',ttt='⭕',bomb='💣',tower='🗼',horse='🏇')
 commands_synced=False
+CHAT_STARTED=discord.utils.time_snowflake(discord.utils.utcnow())
 
 async def database(fn,write=False):
  # SQLite may wait up to 15 seconds for a lock; never wait on the gateway loop.
@@ -286,6 +287,9 @@ async def on_message(message):
  mid=getattr(message,'id',None)
  if mid is None:
   return await asyncio.to_thread(core.activity,payload['uid'],payload['name'],'chat',payload['channel'],roles,payload['category'],stamp=stamp)
+ await enqueue_chat(mid,payload)
+
+async def enqueue_chat(mid,payload):
  for attempt in range(6):
   try:
    await asyncio.to_thread(core.queue_chat,mid,payload)
@@ -294,6 +298,46 @@ async def on_message(message):
    if attempt==5:raise
    await asyncio.sleep(min(4,.25*2**attempt))
  await asyncio.to_thread(core.deliver_chat,mid)
+
+@client.event
+async def on_socket_raw_receive(raw):
+ # Capture MESSAGE_CREATE before discord.py builds a Member/Message object.
+ # No message body or attachments are read or persisted.
+ try:event=json.loads(raw)
+ except (ValueError,TypeError):return
+ if event.get('t')!='MESSAGE_CREATE':return
+ d=event.get('d') or {};author=d.get('author') or {}
+ if str(d.get('guild_id',''))!=str(GUILD_ID) or author.get('bot') or not author.get('id'):return
+ member=d.get('member') or {};channel=client.get_channel(int(d['channel_id']))
+ stamp=discord.utils.parse_time(d.get('timestamp'))
+ payload=dict(uid=str(author['id']),name=member.get('nick') or author.get('global_name') or author.get('username') or str(author['id']),channel=str(d['channel_id']),roles=list(map(str,member.get('roles',[]))),category=str(getattr(channel,'category_id',None) or getattr(getattr(channel,'parent',None),'category_id','') or ''),stamp=stamp.timestamp() if stamp else time.time())
+ await enqueue_chat(d['id'],payload)
+
+async def recover_channel_chat(channel):
+ key=f'chat-cursor:{GUILD_ID}:{channel.id}'
+ row=await database(lambda c:c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone())
+ cursor=int(row[0]) if row else CHAT_STARTED
+ # Commit the initial watermark before any fetch so restarts preserve the window.
+ if not row:await database(lambda c:c.execute('INSERT OR IGNORE INTO meta VALUES(?,?)',(key,str(cursor))).rowcount,True)
+ async for message in channel.history(limit=100,after=discord.Object(id=cursor),oldest_first=True):
+  await on_message(message)
+  # Advance only after the message is durably enqueued (or intentionally ignored).
+  cursor=message.id
+  await database(lambda c:c.execute('UPDATE meta SET value=? WHERE key=?',(str(cursor),key)).rowcount,True)
+
+@tasks.loop(seconds=60)
+async def chat_history_recovery():
+ if not client.is_ready():return
+ guild=client.get_guild(GUILD_ID)
+ if not guild or not guild.me:return
+ channels={c.id:c for c in [*guild.text_channels,*guild.threads]}
+ for channel in channels.values():
+  permissions=channel.permissions_for(guild.me)
+  if not permissions.view_channel or not permissions.read_message_history:continue
+  try:await recover_channel_chat(channel)
+  except Exception as error:
+   logging.warning('Chat history recovery channel=%s error=%s',channel.id,type(error).__name__)
+
 
 @client.event
 async def on_voice_state_update(member,before,after):
@@ -434,6 +478,7 @@ async def on_ready():
  if not client.get_guild(GUILD_ID):print('지정된 서버에 봇을 초대하세요.',flush=True);return
  if not heartbeat_tick.is_running():heartbeat_tick.start()
  if not chat_recovery.is_running():chat_recovery.start()
+ if not chat_history_recovery.is_running():chat_history_recovery.start()
  if not worker.is_running():worker.start()
  if not voice_tick.is_running():voice_tick.start()
  if not reconcile.is_running():reconcile.start()
@@ -541,7 +586,7 @@ async def chat_check(i:discord.Interaction):
 
 social_bot.register(client,tree,GUILD_ID)
 # A temporary database lock must not permanently stop rewards or liveness tasks.
-for background in (sync_commands,heartbeat_tick,chat_recovery,worker,voice_tick,reconcile,social_bot.live_updates):
+for background in (sync_commands,heartbeat_tick,chat_recovery,chat_history_recovery,worker,voice_tick,reconcile,social_bot.live_updates):
  background.add_exception_type(sqlite3.OperationalError)
 
 if __name__=='__main__':asyncio.run(main())
