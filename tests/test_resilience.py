@@ -45,7 +45,7 @@ class Resilience(unittest.IsolatedAsyncioTestCase):
    task=asyncio.create_task(bot.profile.callback(i))
    try:
     await asyncio.sleep(.03)
-    i.response.defer.assert_awaited_once_with(ephemeral=True)
+    i.response.defer.assert_awaited_once_with()
     self.assertFalse(task.done(),'Database contention blocked the gateway event loop')
    finally:
     timer.cancel();timer.join();lock.rollback()

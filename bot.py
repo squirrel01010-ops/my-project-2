@@ -138,23 +138,27 @@ async def attendance(i:discord.Interaction):
  s=await settings();msg=s['attendanceMessage'].replace('{user}',i.user.display_name).replace('{xp}',str(r['xp'])).replace('{streak}',str(r['streak']))
  await i.followup.send(msg[:1900],ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
 
-@tree.command(name='내정보',description='현재 띵조코인와 레벨을 확인해요')
-async def profile(i:discord.Interaction):
- if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
- await i.response.defer(ephemeral=True)
+@tree.command(name='정보',description='나 또는 다른 멤버의 코인·레벨·활동 정보를 확인해요')
+async def profile(i:discord.Interaction,대상:discord.Member=None):
+ if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=False)
+ await i.response.defer()
+ target=대상 or i.user
  def read(c):
-  core.ensure(c,str(i.user.id),i.user.display_name);return core.user(c,str(i.user.id))
+  core.ensure(c,str(target.id),target.display_name);return core.user(c,str(target.id))
  u=await database(read,True)
- e=discord.Embed(title=i.user.display_name,color=0x9d85ff,description=f"Lv. **{u['level']}** · **{u['xp']:,} 띵조코인**\n다음 레벨까지 {u['nextXP']-u['xp']:,} 띵조코인")
- info=await asyncio.to_thread(core.insights,str(i.user.id))
- e.title='🪪 '+i.user.display_name
+ e=discord.Embed(title=target.display_name,color=0x9d85ff,description=f"Lv. **{u['level']}** · **{u['xp']:,} 띵조코인**\n다음 레벨까지 {u['nextXP']-u['xp']:,} 띵조코인")
+ info=await asyncio.to_thread(core.insights,str(target.id))
+ e.title='🪪 '+target.display_name
  e.add_field(name='🏆 서버 순위',value=str(info['rank'])+'위')
  e.add_field(name='📅 연속 출석',value=str(info['attendance']['streak'] if info['attendance'] else 0)+'일')
  e.add_field(name='🎯 오늘 미션',value='\n'.join(m['name']+f" {m['progress']}/{m['target']}"+(' ✅' if m['claimed'] else '') for m in info['missions']['missions']),inline=False)
  v=discord.ui.View(timeout=180)
- for label,callback in [('📅 출석',attendance.callback),('🎁 보상 모두 받기',claim_all),('📊 전적',stats_command.callback)]:
+ async def target_stats(interaction):await stats_command.callback(interaction,target)
+ actions=[('📊 전적',target_stats)]
+ if target.id==i.user.id:actions=[('📅 내 출석',attendance.callback),('🎁 내 보상 모두 받기',claim_all),*actions]
+ for label,callback in actions:
   b=discord.ui.Button(label=label);b.callback=callback;v.add_item(b)
- await i.followup.send(embed=e,view=v,ephemeral=True)
+ await i.followup.send(embed=e,view=v,allowed_mentions=discord.AllowedMentions.none())
 
 @tree.command(name='랭킹',description='서버 띵조코인 상위 10명을 확인해요')
 async def ranking(i:discord.Interaction):
@@ -182,12 +186,12 @@ async def game_help(i:discord.Interaction):
  if i.guild_id!=GUILD_ID:return await i.response.send_message('지정 서버에서 사용하세요',ephemeral=True)
  await i.response.defer(ephemeral=True)
  s=await settings()
- e=discord.Embed(title='🎮 STELLAR · 게임 라운지',description='작은 한 판, 큰 즐거움.\n`/출석`으로 띵조코인을 받고 `/내정보`에서 잔액을 확인하세요.',color=int(s['embedColor'][1:],16))
+ e=discord.Embed(title='🎮 STELLAR · 게임 라운지',description='작은 한 판, 큰 즐거움.\n`/출석`으로 띵조코인을 받고 `/정보`에서 잔액을 확인하세요.',color=int(s['embedColor'][1:],16))
  e.add_field(name='🎲 바로 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if not v[2]),inline=True)
  e.add_field(name='🃏 선택하며 즐기는 게임',value='\n'.join(GAME_ICONS[k]+' /'+v[0].replace(' ','') for k,v in games.CATALOG.items() if v[2]),inline=True)
  e.add_field(name='🤝 함께 즐기기',value='/홀덤 · /복권 · /크래시',inline=False)
  e.add_field(name='💎 이용 안내',value=f"최소 베팅 **{s['minBet']:,} 띵조코인** · 최대 한도 없음\n보유 코인 안에서 베팅할 수 있습니다.\n진행 중인 게임은 /이어하기로 다시 열 수 있어요." if s['casino'] else '현재 관리자가 게임을 잠시 쉬어가도록 설정했어요.',inline=False)
- e.add_field(name='🛠️ 일반 기능',value='/출석 · /내정보 · /랭킹 · /선물 · /상점 · /구매',inline=False)
+ e.add_field(name='🛠️ 일반 기능',value='/출석 · /정보 · /랭킹 · /선물 · /상점 · /구매',inline=False)
  e.add_field(name='🎰 슬롯 배율',value=games.slot_rules(s['games']['slots']),inline=False)
  e.set_footer(text='✦ STELLAR · 서버 가상 띵조코인으로 즐기는 게임')
  await i.followup.send(embed=e,ephemeral=True)
@@ -529,14 +533,14 @@ async def handle_replay(i):
  except (ValueError,PermissionError) as e:await command_error(i,e)
  return True
 
-@tree.command(name='전적',description='나의 게임별 승률·순수익·최근 결과를 확인해요')
-async def stats_command(i:discord.Interaction):
+@tree.command(name='전적',description='나 또는 다른 멤버의 게임별 승률·순수익·최근 결과를 확인해요')
+async def stats_command(i:discord.Interaction,대상:discord.Member=None):
  if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
- await i.response.defer(ephemeral=True);r=await asyncio.to_thread(core.game_stats,str(i.user.id))
- e=discord.Embed(title='📊 내 게임 전적',description=r['scope'],color=0x9d85ff)
+ await i.response.defer();target=대상 or i.user;r=await asyncio.to_thread(core.game_stats,str(target.id))
+ e=discord.Embed(title='📊 '+target.display_name+' · 게임 전적',description=r['scope'],color=0x9d85ff)
  for g in r['games']:e.add_field(name=(games.CATALOG[g['game']][0] if g['game'] in games.CATALOG else core.social.CATALOG[g['game']]['name']),value=f"{g['plays']}판 · 승률 {g['wins']/g['plays']*100:.1f}%\n💰 순수익 {g['net']:+,} · 최대 반환 {g['best']:,} 띵조코인")
  e.add_field(name='최근 결과',value='\n'.join((games.CATALOG[x['game']][0] if x['game'] in games.CATALOG else core.social.CATALOG[x['game']]['name'])+f" · {x['payout']-x['bet']:+,}" for x in r['recent'][:10]) or '아직 기록이 없어요',inline=False)
- await i.followup.send(embed=e,ephemeral=True)
+ await i.followup.send(embed=e,allowed_mentions=discord.AllowedMentions.none())
 
 @tree.command(name='미션',description='오늘의 활동 미션과 받을 보상을 확인해요')
 async def mission_command(i:discord.Interaction):

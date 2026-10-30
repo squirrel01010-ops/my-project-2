@@ -342,7 +342,7 @@ def operate(actor,path,b,admin=False,context=None):
     bet=wager(b.get('bet'),max(s['minBet'],cfg['minBet']),user(c,uid)['xp'])
     expire_rounds(c,time.time(),uid)
     if c.execute("SELECT 1 FROM game_rounds WHERE uid=? AND status='active'",(uid,)).fetchone():raise ValueError('진행 중인 게임을 먼저 마치세요. /이어하기로 다시 열 수 있어요')
-    if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /내정보에서 잔액을 확인하세요')
+    if user(c,uid)['xp']<bet:raise ValueError('베팅할 띵조코인이 부족해요. /출석 또는 채팅 활동으로 띵조코인을 모은 뒤 /정보에서 잔액을 확인하세요')
     cooldown(c,'game:'+uid,s['gameCooldown']);st=games.start(g,b.get('choice'),{**cfg,'outcomeWeights':s['probabilities'].get(g,[])});st['choice']=b.get('choice');adjust(c,uid,-bet,games.CATALOG[g][0]+' 베팅')
     rid=secrets.token_hex(12);now=time.time()
     c.execute("INSERT INTO game_rounds(id,uid,game,bet,state,fee,created,expires,status) VALUES(?,?,?,?,?,?,?,?,'active')",(rid,uid,g,bet,json.dumps(st),cfg['fee'],now,now+s['gameTimeout']))
