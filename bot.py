@@ -258,7 +258,7 @@ async def buy(i:discord.Interaction,상품번호:int):
 
 @tree.command(name='포인트관리',description='관리자 전용: 멤버 띵조코인 지급·차감·설정')
 @app_commands.choices(작업=[app_commands.Choice(name='지급',value='give'),app_commands.Choice(name='차감',value='take'),app_commands.Choice(name='잔액 설정',value='set')])
-async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,금액:app_commands.Range[int,0,100000000],사유:str='관리자 조정'):
+async def manage_points(i:discord.Interaction,대상:discord.Member,작업:str,금액:app_commands.Range[int,0,1000000000000000],사유:str='관리자 조정'):
  await i.response.defer(ephemeral=True)
  if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
  member=await i.guild.fetch_member(i.user.id)

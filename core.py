@@ -129,7 +129,7 @@ def job(c,kind,payload):
 def recover_jobs():
  with db(True) as c:c.execute("UPDATE jobs SET status='pending' WHERE status='processing'")
 def adjust(c,uid,delta,reason,score=True,s=None):
- integer(delta,-10**12,10**12);s=settings(c) if s is None else s;before=user(c,uid,s)
+ integer(delta,-10**15,10**15);s=settings(c) if s is None else s;before=user(c,uid,s)
  if not c.execute('UPDATE users SET xp=xp+? WHERE id=? AND xp+? BETWEEN 0 AND 1000000000000000',(delta,uid,delta)).rowcount:raise ValueError('띵조코인이 부족하거나 잔액 한도를 초과합니다')
  c.execute('INSERT INTO ledger(uid,delta,reason) VALUES(?,?,?)',(uid,delta,reason[:200]))
  if score:
@@ -301,7 +301,7 @@ def operate(actor,path,b,admin=False,context=None):
     if value['seasonMode']!=s['seasonMode'] or value['timezone']!=s['timezone']:c.execute("UPDATE seasons SET ends=? WHERE status='active'",(season_end(value,time.time()),))
     audit(c,actor,path,{k:v for k,v in value.items() if v!=s.get(k)});job(c,'all_roles',{});return dict(ok=True)
    if path=='adjust':
-    ensure(c,uid,b.get('name'));amount=integer(b.get('amount'),-100000000,100000000)
+    ensure(c,uid,b.get('name'));amount=integer(b.get('amount'),-10**15,10**15)
     if b.get('mode','add')=='set':
      if amount<0:raise ValueError('설정할 띵조코인은 0 이상이어야 합니다')
      amount-=user(c,uid)['xp']
