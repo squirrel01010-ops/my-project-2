@@ -521,8 +521,5 @@ social_bot.register(client,tree,GUILD_ID)
 # A temporary database lock must not permanently stop rewards or liveness tasks.
 for background in (sync_commands,heartbeat_tick,chat_recovery,worker,voice_tick,reconcile,social_bot.live_updates):
  background.add_exception_type(sqlite3.OperationalError)
-for command in tree.get_commands():
- category='관리' if command.name in ('포인트관리','관리') else '기능' if command.name in ('출석','내정보','랭킹','선물','상점','구매','전적','미션','주간순위') else '게임'
- command.description=f'[{category}] '+command.description
 
 if __name__=='__main__':asyncio.run(main())

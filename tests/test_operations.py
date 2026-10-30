@@ -25,10 +25,9 @@ class Operations(unittest.TestCase):
   self.assertIsNone(core.resume_game('a'))
   for i in range(26):core.operate('a','product',dict(name=str(i),kind='role',role_id=str(i+1),price=10,key='product'+str(i)),True)
   self.assertEqual(len(core.shop_catalog('a',3)['products']),6)
- def test_command_names_remain_flat_and_tagged(self):
+ def test_command_names_remain_flat_without_category_tags(self):
   self.assertIsNotNone(bot.tree.get_command('슬롯'))
-  self.assertTrue(bot.tree.get_command('출석').description.startswith('[기능]'))
-  self.assertTrue(bot.tree.get_command('슬롯').description.startswith('[게임]'))
+  self.assertFalse(any(c.description.startswith(('[게임]','[기능]','[관리]')) for c in bot.tree.get_commands()))
   self.assertFalse(any(isinstance(c,bot.app_commands.Group) for c in bot.tree.get_commands()))
  def test_section_skips_unrelated_data(self):
   s=core.state('a',True,'settings')
