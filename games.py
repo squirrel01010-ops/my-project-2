@@ -226,3 +226,53 @@ def odds_deck(rng,cards,weights,index):
 from types import SimpleNamespace
 outcome_odds=SimpleNamespace(CATALOG=odds_CATALOG,CRASH_POINTS=odds_CRASH_POINTS,validate=odds_validate,choose=odds_choose,sample=odds_sample,deck=odds_deck)
 odds=outcome_odds
+
+
+def odds_preview(settings,game,choice=None,bet=100):
+ """Pure preview: exact enumeration where possible; sampled strategy otherwise."""
+ import itertools
+ number(bet,1,100000000)
+ if game not in CATALOG:raise ValueError('개인 게임을 선택하세요')
+ cfg=settings['games'][game];weights=settings.get('probabilities',{}).get(game,[])
+ cfg={**cfg,'outcomeWeights':weights};outcomes=[];method='정확 계산';strategy=''
+ n={'coin':6,'dice':6,'slots':5,'scratch':4,'wheel':8,'roulette':37,'horse':5}.get(game)
+ if game in ('dice','horse'):
+  try:choice=int(choice)
+  except (ValueError,TypeError):choice=1
+ if game in ('coin','roulette','baccarat') and not choice:choice={'coin':'odd','roulette':'red','baccarat':'player'}[game]
+ if n:
+  w=weights or [1]*n;total_w=sum(w);p=[v/total_w for v in w]
+  if game in ('slots','scratch'):
+   for a,b,c in itertools.product(range(n),repeat=3):
+    count=len({a,b,c});mult=(cfg.get('tripleMultipliers',SLOT_TRIPLES)[a] if count==1 else cfg.get('pairMultiplier',.5) if count==2 else 0) if game=='slots' else 16 if count==1 else 0
+    outcomes.append((mult,p[a]*p[b]*p[c]))
+  else:
+   # Reuse validation for player choices.
+   start(game,choice,cfg)
+   for i,prob in enumerate(p):
+    if game=='coin':mult=2 if ((i+1)%2==1)==(choice=='odd') else 0
+    elif game=='dice':mult=6 if i+1==choice else 0
+    elif game=='horse':mult=5 if i+1==choice else 0
+    elif game=='wheel':mult=cfg.get('wheelMultipliers',[0,0,0,0,1,1,2,4])[i]
+    else:
+     color='zero' if i==0 else 'red' if i in RED else 'black';mult=cfg.get(color+'Multiplier',36 if color=='zero' else 2) if color==choice else 0
+    outcomes.append((mult,prob))
+ else:
+  method='시뮬레이션 1,000판 · 추정치'
+  strategy={'blackjack':'합계 17 이상이면 멈춤','indian':'항상 콜','baskin':'항상 1개 세기','ttt':'앞쪽 빈 칸부터 선택','highlow':'7 미만은 높음, 나머지는 낮음 · 1회 후 정산','mines':'1번 칸 1회 선택 후 정산','bomb':'1번 전선 1회 선택 후 정산','tower':'첫 층 1번 선택 후 정산','baccarat':'표준 바카라 규칙'}[game]
+  for _ in range(1000):
+   st=start(game,choice,cfg)
+   for step in range(40):
+    if st['done']:break
+    if game=='blackjack':act,value=('hit' if total(st['player'])<17 else 'stand'),None
+    elif game=='indian':act,value='call',None
+    elif game=='baskin':act,value='count',1
+    elif game=='ttt':act,value='pick',next(i for i,v in enumerate(st['board']) if not v)
+    elif step:act,value='cashout',None
+    elif game=='highlow':act,value=('higher' if st['card']<7 else 'lower'),None
+    else:act,value='pick',0
+    st=action(st,act,value)
+   outcomes.append((st['mult'],.001))
+ values=[(int(bet*m)-max(0,int(bet*m)-bet)*cfg['fee']//100,p) for m,p in outcomes]
+ mean=sum(v*p for v,p in values);variance=sum(p*(v-mean)**2 for v,p in values)
+ return dict(game=game,choice=choice,bet=bet,method=method,strategy=strategy,winChance=sum(p for v,p in values if v>bet)*100,returnRate=mean/bet*100,expectedProfit=mean-bet,margin95=1.96*math.sqrt(variance/1000)/bet*100 if not n else 0,fee=cfg['fee'])

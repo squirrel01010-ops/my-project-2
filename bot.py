@@ -91,7 +91,9 @@ def game_embed(r):
 
 def game_view(r):
  view=discord.ui.View(timeout=None)
- if r['status']=='done':return view
+ if r['status']=='done':
+  for label,act in [('↻ 같은 금액으로','repeat'),('💰 베팅액 변경','bet'),('🎮 다른 게임','menu')]:view.add_item(discord.ui.Button(label=label,custom_id=f"replay:{r['id']}:{act}",style=discord.ButtonStyle.secondary))
+  return view
  s=r['state'];g=r['game'];controls=[]
  if g=='blackjack':controls=[('카드 받기','hit',''),('멈추기','stand','')]
  elif g=='indian':controls=[('콜','call',''),('폴드','fold','')]
@@ -108,6 +110,7 @@ def game_view(r):
 
 @client.event
 async def on_interaction(i):
+ if await handle_replay(i):return
  if await social_bot.handle(i):return
  if i.type!=discord.InteractionType.component or not i.data.get('custom_id','').startswith('orbit:'):return
  await i.response.defer()
@@ -444,12 +447,68 @@ async def main():
   message='봇 로그인에 실패했습니다. 호스팅의 DISCORD_TOKEN을 확인하세요.'
   await asyncio.to_thread(command_status,state='error',count=0,message=message)
   raise SystemExit(message)
+class BetModal(discord.ui.Modal):
+ def __init__(self,r):
+  super().__init__(title='💰 베팅액 변경');self.r=r
+  self.amount=discord.ui.TextInput(label='베팅할 띵조코인',default=str(r['bet']),max_length=15);self.add_item(self.amount)
+ async def on_submit(self,i):
+  try:await start_game(i,self.r['game'],int(self.amount.value),self.r['state'].get('choice'))
+  except (ValueError,PermissionError) as e:await command_error(i,e)
+
+async def handle_replay(i):
+ if i.type!=discord.InteractionType.component or not i.data.get('custom_id','').startswith('replay:'):return False
+ try:
+  _,rid,act=i.data['custom_id'].split(':')
+  if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
+  row=await database(lambda c:c.execute("SELECT * FROM game_rounds WHERE id=? AND uid=? AND status='done'",(rid,str(i.user.id))).fetchone())
+  if not row:raise PermissionError('본인의 게임 결과에서 사용하세요')
+  r=core.round_view(row)
+  if act=='menu':await game_help.callback(i)
+  elif act=='bet':await i.response.send_modal(BetModal(r))
+  elif act=='repeat':await start_game(i,r['game'],r['bet'],r['state'].get('choice'))
+  else:raise ValueError('버튼을 확인하세요')
+ except (ValueError,PermissionError) as e:await command_error(i,e)
+ return True
+
+@tree.command(name='전적',description='나의 게임별 승률·순수익·최근 결과를 확인해요')
+async def stats_command(i:discord.Interaction):
+ if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
+ await i.response.defer(ephemeral=True);r=await asyncio.to_thread(core.game_stats,str(i.user.id))
+ e=discord.Embed(title='📊 내 게임 전적',description=r['scope'],color=0x9d85ff)
+ for g in r['games']:e.add_field(name=(games.CATALOG[g['game']][0] if g['game'] in games.CATALOG else core.social.CATALOG[g['game']]['name']),value=f"{g['plays']}판 · 승률 {g['wins']/g['plays']*100:.1f}%\n💰 순수익 {g['net']:+,} · 최대 반환 {g['best']:,} 띵조코인")
+ e.add_field(name='최근 결과',value='\n'.join((games.CATALOG[x['game']][0] if x['game'] in games.CATALOG else core.social.CATALOG[x['game']]['name'])+f" · {x['payout']-x['bet']:+,}" for x in r['recent'][:10]) or '아직 기록이 없어요',inline=False)
+ await i.followup.send(embed=e,ephemeral=True)
+
+@tree.command(name='미션',description='오늘의 활동 미션과 받을 보상을 확인해요')
+async def mission_command(i:discord.Interaction):
+ if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
+ await i.response.defer(ephemeral=True);r=await asyncio.to_thread(core.missions,str(i.user.id))
+ e=discord.Embed(title='🎯 오늘의 미션',description=r['day']+' · 서버 시간대 기준',color=0x9d85ff);v=discord.ui.View(timeout=180)
+ for m in r['missions']:
+  e.add_field(name=m['name'],value=f"{m['progress']}/{m['target']} · 🪙 {m['reward']:,}"+(' · 수령 완료' if m['claimed'] else ''),inline=False)
+  b=discord.ui.Button(label=m['name']+' 보상 받기',disabled=m['claimed'] or m['progress']<m['target'])
+  async def claim(interaction,kind=m['kind']):
+   await interaction.response.defer(ephemeral=True)
+   try:
+    result=await operation(interaction,'mission/claim',dict(kind=kind));await interaction.followup.send(f"🪙 +{result['reward']:,} 띵조코인 수령 완료",ephemeral=True)
+   except (ValueError,PermissionError) as e:await command_error(interaction,e)
+  b.callback=claim;v.add_item(b)
+ await i.followup.send(embed=e,view=v,ephemeral=True)
+
+@tree.command(name='주간순위',description='채팅·출석·개인 게임 주간 순위와 보상을 확인해요')
+async def weekly_command(i:discord.Interaction):
+ if i.guild_id!=GUILD_ID:raise PermissionError('지정 서버에서 사용하세요')
+ await i.response.defer();r=await asyncio.to_thread(core.weekly_board)
+ e=discord.Embed(title='🏆 주간 경쟁',description=r['day']+' ~ '+r['ends']+' (종료일 00시 정산)\n동점은 유저 ID 순 · 분야별 1~3위 보상 '+('/'.join(map(str,r['config']['rewards'])) if r['config']['enabled'] else '비활성'),color=0x9d85ff)
+ for k,title in [('chat','💬 채팅'),('attendance','📅 출석'),('games','🎲 개인 게임 순수익')]:e.add_field(name=title,value='\n'.join(f"{n+1}. {u['name'][:40]} · {u['score']:+,}" for n,u in enumerate(r['rankings'][k][:10])) or '아직 기록이 없어요',inline=False)
+ await i.followup.send(embed=e,allowed_mentions=discord.AllowedMentions.none())
+
 social_bot.register(client,tree,GUILD_ID)
 # A temporary database lock must not permanently stop rewards or liveness tasks.
 for background in (sync_commands,heartbeat_tick,chat_recovery,worker,voice_tick,reconcile,social_bot.live_updates):
  background.add_exception_type(sqlite3.OperationalError)
 for command in tree.get_commands():
- category='관리' if command.name in ('포인트관리','관리') else '기능' if command.name in ('출석','내정보','랭킹','선물','상점','구매') else '게임'
+ category='관리' if command.name in ('포인트관리','관리') else '기능' if command.name in ('출석','내정보','랭킹','선물','상점','구매','전적','미션','주간순위') else '게임'
  command.description=f'[{category}] '+command.description
 
 if __name__=='__main__':asyncio.run(main())

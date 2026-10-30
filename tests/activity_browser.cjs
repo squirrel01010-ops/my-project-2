@@ -11,9 +11,22 @@ const fs=require('node:fs');const os=require('node:os');const path=require('node
   const page=await browser.newPage({timezoneId:'Asia/Seoul',viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:8092');await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'/workspace/stellar/preview-login.png',fullPage:true,animations:'disabled'});await page.locator('#local-login summary').click();await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#login').waitFor({state:'hidden'});
   await page.locator('#chat-health-refresh').waitFor();
+  await page.evaluate(()=>api('attendance',{}));
+  await page.locator('[data-page="missions"]').click();await page.locator('[data-claim="attendance"]').waitFor();
+  await page.locator('[data-claim="attendance"]').click();await page.getByText('🪙 +50 띵조코인 받았어요!').waitFor();
+  await page.locator('[data-page="records"]').click();await page.getByRole('heading',{name:'📊 내 게임 전적'}).waitFor();
+  await page.locator('[data-page="weekly"]').click();await page.getByRole('heading',{name:'🏆 이번 주의 주인공'}).waitFor();
+  await page.locator('[data-page="settings"]').click();await page.locator('#odds-preview button').click();await page.getByText('정확 계산',{exact:true}).waitFor();
+  await page.locator('#goal-settings').waitFor();
   await page.locator('[data-page="activity"]').click();await page.getByRole('heading',{name:'나의 코인 기록'}).waitFor();
   await page.setViewportSize({width:390,height:844});
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Activity mobile overflow');
+  for(const name of ['records','missions','weekly']){
+   await page.locator('[data-page="'+name+'"]').click();await page.locator('#content .panel, #content .card, #content .hero').first().waitFor();
+   await page.waitForTimeout(150);
+   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error(name+' mobile overflow');
+  }
+  await page.locator('[data-page="activity"]').click();await page.getByRole('heading',{name:'나의 코인 기록'}).waitFor();
   await page.screenshot({path:'/workspace/stellar/preview-activity-mobile.png',fullPage:true});
   await page.locator('[data-page="history"]').click();await page.locator('#history-filter button').click();await page.locator('#history-next').waitFor();
   await page.locator('[data-page="casino"]').click();await page.locator('[data-game="slots"]').waitFor();

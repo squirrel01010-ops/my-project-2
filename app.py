@@ -106,6 +106,13 @@ class Handler(BaseHTTPRequestHandler):
      core.ensure(c,me['id'],me.get('global_name') or me['username']);c.execute('INSERT INTO sessions VALUES(?,?,?,?,?)',(digest(session),me['id'],me.get('global_name') or me['username'],secrets.token_urlsafe(24),time.time()+86400))
     return self.send(302,b'',headers={'Location':'/','Set-Cookie':self.cookie_header('orbit_session',session,86400)})
    who=self.identity()
+   if p.path=='/api/game-stats':return self.send(200,core.game_stats(who['id']))
+   if p.path=='/api/missions':return self.send(200,core.missions(who['id']))
+   if p.path=='/api/weekly':return self.send(200,core.weekly_board())
+   if p.path=='/api/odds-preview':
+    if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
+    with core.db() as c:s=core.settings(c)
+    return self.send(200,core.games.odds_preview(s,query.get('game',['slots'])[0],query.get('choice',[''])[0],int(query.get('bet',['100'])[0])))
    if p.path=='/api/chat-health':
     if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
     return self.send(200,core.chat_health())
@@ -134,6 +141,13 @@ class Handler(BaseHTTPRequestHandler):
    if not 0<n<=262144:raise ValueError('요청 크기를 확인하세요')
    body=json.loads(self.rfile.read(n))
    if not isinstance(body,dict):raise ValueError('JSON 객체를 입력하세요')
+   if self.path=='/api/odds-preview':
+    if not who['admin']:raise PermissionError('관리자 권한이 필요합니다')
+    with core.db() as c:s=core.settings(c)
+    draft=body.get('settings',{})
+    if not isinstance(draft,dict):raise ValueError('설정을 확인하세요')
+    s=core.validate_settings({**s,**draft})
+    return self.send(200,core.games.odds_preview(s,body.get('game','slots'),body.get('choice'),body.get('bet',100)))
    if self.path=='/api/logout':
     with core.db(True) as c:c.execute('DELETE FROM sessions WHERE hash=?',(digest(self.cookie('orbit_session')),))
     return self.send(200,dict(ok=True),headers={'Set-Cookie':self.cookie_header('orbit_session','',0)})

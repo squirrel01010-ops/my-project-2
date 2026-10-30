@@ -28,7 +28,7 @@ DEFAULTS=dict(chatXP=25,cooldown=0,voiceXP=12,attendanceXP=50,streakBonus=10,str
  roleRewards=[],roleMode='highest',nicknameFormat='',levelChannel='',logChannel='',rankingChannel='',rankingInterval=3600,
  levelMessage='{user}님이 레벨 {level}에 도달했어요!',attendanceMessage='{user}님 출석 완료! +{xp} 띵조코인 · {streak}일 연속',
  embedColor='#9d85ff',boosts=[],seasonMode='off',seasonResetXP=False,seasonRewards=[],giftFee=0,
- social=social.DEFAULTS,probabilities={},
+ social=social.DEFAULTS,probabilities={},missions=dict(chatTarget=20,voiceTarget=10,chatReward=100,voiceReward=100,attendanceReward=50),weekly=dict(enabled=True,rewards=[500,300,100]),
  games={k:dict(enabled=True,fee=0,minBet=10,maxBet=10000) for k in games.CATALOG})
 
 @contextmanager
@@ -77,6 +77,14 @@ def init():
   c.execute("CREATE TABLE IF NOT EXISTS chat_inbox(id TEXT PRIMARY KEY,payload TEXT,status TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,next_retry REAL DEFAULT 0,last_error TEXT DEFAULT '',created REAL,updated REAL)")
   c.execute('CREATE INDEX IF NOT EXISTS chat_inbox_due ON chat_inbox(status,next_retry)')
   c.execute('CREATE INDEX IF NOT EXISTS ledger_date ON ledger(created)')
+  c.executescript('''
+  CREATE TABLE IF NOT EXISTS mission_claims(uid TEXT,day TEXT,kind TEXT,reward INTEGER,PRIMARY KEY(uid,day,kind));
+  CREATE TABLE IF NOT EXISTS attendance_days(uid TEXT,day TEXT,PRIMARY KEY(uid,day));
+  CREATE TABLE IF NOT EXISTS game_results(round TEXT PRIMARY KEY,uid TEXT,game TEXT,bet INTEGER,payout INTEGER,created REAL);
+  CREATE INDEX IF NOT EXISTS game_results_user ON game_results(uid,created);
+  CREATE INDEX IF NOT EXISTS game_results_date ON game_results(created);
+  CREATE TABLE IF NOT EXISTS weekly_periods(day TEXT PRIMARY KEY,ends TEXT,config TEXT,status TEXT,snapshot TEXT);
+  ''')
   social.init(c)
   c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)',(json.dumps(DEFAULTS),))
   current=settings(c);c.execute('UPDATE settings SET data=? WHERE id=1',(json.dumps(current),))
@@ -188,6 +196,13 @@ def validate_settings(value):
  slot=s['games']['slots'];pair=slot.get('pairMultiplier',0.5);triples=slot.get('tripleMultipliers',games.SLOT_TRIPLES)
  if not isinstance(triples,list) or len(triples)!=5:raise ValueError('슬롯 모양별 배율은 5개를 입력하세요')
  if any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in [pair,*triples]):raise ValueError('슬롯 배율은 0~1000 사이 숫자여야 합니다')
+ for key in ('missions','weekly'):
+  if not isinstance(s[key],dict):raise ValueError('미션·주간 설정을 확인하세요')
+ s['missions']={**DEFAULTS['missions'],**s['missions']}
+ for key,v in s['missions'].items():integer(v,1 if key.endswith('Target') else 0,1000000)
+ s['weekly']={**DEFAULTS['weekly'],**s['weekly']}
+ if type(s['weekly']['enabled']) is not bool or not isinstance(s['weekly']['rewards'],list) or len(s['weekly']['rewards'])!=3:raise ValueError('주간 순위 보상은 1~3위 금액을 입력하세요')
+ for v in s['weekly']['rewards']:integer(v,0,1000000)
  s['probabilities']=odds.validate(s.get('probabilities',{}))
  s['social']=social.validate(s.get('social',{}))
  return s
@@ -235,10 +250,12 @@ def round_view(r):
  out=dict(r);out['state']=games.public_view(json.loads(r['state']));return out
 
 def settle(c,r,s):
+ if r['status']!='active':return
  # Fee is on positive profit only; stake refunds are never taxed.
  raw=int(r['bet']*s['mult']);payout=raw-max(0,raw-r['bet'])*r['fee']//100
  if payout:adjust(c,r['uid'],payout,games.CATALOG[r['game']][0]+' 정산')
  c.execute("UPDATE game_rounds SET status='done',payout=?,state=? WHERE id=?",(payout,json.dumps(s),r['id']))
+ c.execute("INSERT OR IGNORE INTO game_results VALUES(?,?,?,?,?,?)",(r['id'],r['uid'],r['game'],r['bet'],payout,time.time()))
 
 def finish_season(c,name=None):
  old=c.execute("SELECT * FROM seasons WHERE status='active'").fetchone();s=settings(c)
@@ -290,12 +307,19 @@ def operate(actor,path,b,admin=False,context=None):
      amount-=user(c,uid)['xp']
     elif b.get('mode','add')!='add':raise ValueError('잘못된 조정 방식입니다')
     reason=str(b.get('reason','관리자 조정'))[:200];result=adjust(c,uid,amount,reason);audit(c,actor,path,dict(uid=uid,amount=amount,reason=reason));job(c,'log',dict(text=f'관리자 {actor}: {uid} 띵조코인 {amount:+,} ({reason})'));return result
+   if path=='mission/claim':
+    ensure(c,actor,context.get('name'));kind=b.get('kind');info=mission_state(c,actor,s)
+    item=next((m for m in info['missions'] if m['kind']==kind),None)
+    if not item or item['progress']<item['target']:raise ValueError('아직 미션을 완료하지 않았어요')
+    if item['claimed']:raise ValueError('이미 받은 미션 보상입니다')
+    c.execute('INSERT INTO mission_claims VALUES(?,?,?,?)',(actor,info['day'],kind,item['reward']))
+    adjust(c,actor,item['reward'],'일일 미션: '+kind,False);return dict(ok=True,reward=item['reward'])
    if path=='attendance':
     ensure(c,uid,context.get('name') if uid==actor else None);day=today(s);row=c.execute('SELECT * FROM attendance WHERE uid=?',(uid,)).fetchone()
     if row and row['last_day']>=str(day):raise ValueError('오늘은 이미 출석했어요. 서버 시간대를 변경했다면 마지막 출석일 다음 날부터 받을 수 있어요')
     streak=row['streak']+1 if row and row['last_day']==str(day-timedelta(days=1)) else 1;count=(row['total'] if row else 0)+1
     xp=boosted(s['attendanceXP']+s['streakBonus']*min(streak-1,s['streakCap']),s,'attendance',context.get('channel',''),context.get('roles',[]))
-    c.execute('INSERT INTO attendance VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET last_day=excluded.last_day,streak=excluded.streak,total=excluded.total',(uid,str(day),streak,count));adjust(c,uid,xp,'일일 출석');job(c,'roles',dict(uid=uid));return dict(ok=True,xp=xp,streak=streak,total=count)
+    c.execute('INSERT INTO attendance VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET last_day=excluded.last_day,streak=excluded.streak,total=excluded.total',(uid,str(day),streak,count));c.execute('INSERT OR IGNORE INTO attendance_days VALUES(?,?)',(uid,str(day)));adjust(c,uid,xp,'일일 출석');job(c,'roles',dict(uid=uid));return dict(ok=True,xp=xp,streak=streak,total=count)
    if path=='gift':
     ensure(c,uid,context.get('name') if uid==actor else None);to=ident(b.get('to',''));ensure(c,to)
     if to==uid:raise ValueError('자신에게 선물할 수 없습니다')
@@ -412,6 +436,7 @@ def maintenance():
  with db(True) as c:
   now=time.time()
   c.execute("DELETE FROM chat_inbox WHERE status='paid' AND updated<?",(now-604800,))
+  weekly_tick(c,settings(c))
   social.maintenance(c,settings(c),now)
   expire_rounds(c,now)
   expired=c.execute("SELECT * FROM orders WHERE status='active' AND expires IS NOT NULL AND expires<?",(now,)).fetchall()
@@ -526,3 +551,57 @@ def shop_catalog(uid,page=1):
   page=min(page,max(1,(total+9)//10))
   rows=[dict(r) for r in c.execute("SELECT p.*,(SELECT COUNT(DISTINCT code) FROM inventory i WHERE product_id=p.id AND order_id IS NULL AND NOT EXISTS (SELECT 1 FROM inventory used WHERE used.product_id=i.product_id AND used.code=i.code AND used.order_id IS NOT NULL)) codes,EXISTS(SELECT 1 FROM orders o WHERE o.uid=? AND o.role_id=p.role_id AND o.status='active' AND (o.expires IS NULL OR o.expires>?)) owned FROM products p WHERE active=1 ORDER BY id LIMIT 10 OFFSET ?",(uid,now,(page-1)*10))]
   return dict(products=rows,page=page,pages=max(1,(total+9)//10))
+
+
+def mission_state(c,uid,s):
+ day=str(today(s));cfg={**DEFAULTS['missions'],**s.get('missions',{})}
+ counts={r['kind']:r['n'] for r in c.execute('SELECT kind,SUM(amount) n FROM activity WHERE uid=? AND day=? GROUP BY kind',(uid,day))}
+ a=c.execute('SELECT last_day FROM attendance WHERE uid=?',(uid,)).fetchone()
+ claimed={r[0] for r in c.execute('SELECT kind FROM mission_claims WHERE uid=? AND day=?',(uid,day))}
+ return dict(day=day,missions=[dict(kind=k,name=name,progress=progress,target=target,reward=reward,claimed=k in claimed) for k,name,progress,target,reward in [('chat','💬 채팅 미션',counts.get('chat',0),cfg['chatTarget'],cfg['chatReward']),('voice','🎙️ 음성 활동 미션',counts.get('voice',0),cfg['voiceTarget'],cfg['voiceReward']),('attendance','📅 오늘 출석',int(bool(a and a[0]==day)),1,cfg['attendanceReward'])]])
+
+def missions(uid):
+ with db() as c:return mission_state(c,uid,settings(c))
+
+def game_stats(uid):
+ with db() as c:
+  query="""SELECT id,game,bet,payout,created FROM game_rounds WHERE uid=? AND status='done'
+  UNION ALL SELECT g.id,g.kind,CASE WHEN g.kind='holdem' THEN json_extract(g.state,'$.buyin') ELSE json_extract(p.value,'$.bet') END,
+   CASE WHEN g.kind='holdem' THEN COALESCE(json_extract(g.state,?),0) ELSE COALESCE(json_extract(p.value,'$.payout'),0) END,g.created
+   FROM live_games g,json_each(g.state,'$.players') p WHERE g.kind IN ('holdem','crash') AND g.status='done' AND json_extract(p.value,'$.uid')=?
+  UNION ALL SELECT t.id,'lottery',t.price,t.payout,g.created FROM lottery_tickets t JOIN live_games g ON g.id=t.draw WHERE t.uid=? AND g.status='done'"""
+  args=(uid,'$.payouts.'+json.dumps(str(uid)),uid,uid)
+  rows=[dict(r) for r in c.execute("SELECT game,COUNT(*) plays,SUM(CASE WHEN payout>bet THEN 1 ELSE 0 END) wins,SUM(CASE WHEN payout=bet THEN 1 ELSE 0 END) draws,SUM(bet) wagered,SUM(payout) paid,SUM(payout-bet) net,MAX(payout) best FROM ("+query+") GROUP BY game",args)]
+  recent=[dict(r) for r in c.execute('SELECT * FROM ('+query+') ORDER BY created DESC,id DESC LIMIT 20',args)]
+  return dict(games=rows,recent=recent,scope='게임 19종 · 복권은 1장=1판 · 완료된 판만 집계 · 수수료 반영 · 승리는 반환액이 베팅액보다 큰 판')
+
+
+def weekly_ranking(c,day,end,s):
+ start=datetime.fromisoformat(day).replace(tzinfo=ZoneInfo(s['timezone'])).timestamp();stop=datetime.fromisoformat(end).replace(tzinfo=ZoneInfo(s['timezone'])).timestamp()
+ queries={
+ 'chat':("SELECT uid,SUM(amount) score FROM activity WHERE day>=? AND day<? AND kind='chat' GROUP BY uid HAVING score>0",(day,end)),
+ 'attendance':('SELECT uid,COUNT(*) score FROM attendance_days WHERE day>=? AND day<? GROUP BY uid',(day,end)),
+ 'games':('SELECT uid,SUM(payout-bet) score FROM game_results WHERE created>=? AND created<? GROUP BY uid HAVING score>0',(start,stop))}
+ out={}
+ for kind,(query,args) in queries.items():
+  out[kind]=[dict(r) for r in c.execute('SELECT q.uid,u.name,q.score FROM ('+query+') q JOIN users u ON q.uid=u.id ORDER BY q.score DESC,q.uid LIMIT 20',args)]
+ return out
+
+def weekly_tick(c,s):
+ day=today(s);monday=day-timedelta(days=day.weekday());cfg={**DEFAULTS['weekly'],**s.get('weekly',{})}
+ for row in c.execute("SELECT * FROM weekly_periods WHERE status='active' AND ends<=?",(str(day),)).fetchall():
+  saved=json.loads(row['config']);ranking=weekly_ranking(c,row['day'],row['ends'],{'timezone':saved['timezone']})
+  if saved['enabled']:
+   for kind,rows in ranking.items():
+    for i,u in enumerate(rows[:3]):
+     reward=saved['rewards'][i]
+     if reward:adjust(c,u['uid'],reward,'주간 '+kind+' '+str(i+1)+'위 보상',False)
+  c.execute("UPDATE weekly_periods SET status='done',snapshot=? WHERE day=?",(json.dumps(ranking),row['day']))
+ c.execute("INSERT OR IGNORE INTO weekly_periods VALUES(?,?,?,'active',NULL)",(str(monday),str(monday+timedelta(days=7)),json.dumps(dict(cfg,timezone=s['timezone']))))
+
+def weekly_board():
+ with db(True) as c:
+  s=settings(c);weekly_tick(c,s)
+  row=c.execute("SELECT * FROM weekly_periods WHERE status='active' ORDER BY day DESC LIMIT 1").fetchone();cfg=json.loads(row['config'])
+  previous=c.execute("SELECT * FROM weekly_periods WHERE status='done' ORDER BY day DESC LIMIT 1").fetchone()
+  return dict(day=row['day'],ends=row['ends'],config=cfg,rankings=weekly_ranking(c,row['day'],row['ends'],cfg),previous=dict(day=previous['day'],rankings=json.loads(previous['snapshot'])) if previous else None)
