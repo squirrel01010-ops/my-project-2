@@ -307,6 +307,13 @@ def operate(actor,path,b,admin=False,context=None):
      amount-=user(c,uid)['xp']
     elif b.get('mode','add')!='add':raise ValueError('잘못된 조정 방식입니다')
     reason=str(b.get('reason','관리자 조정'))[:200];result=adjust(c,uid,amount,reason);audit(c,actor,path,dict(uid=uid,amount=amount,reason=reason));job(c,'log',dict(text=f'관리자 {actor}: {uid} 띵조코인 {amount:+,} ({reason})'));return result
+   if path=='mission/claim-all':
+    ensure(c,actor,context.get('name'));info=mission_state(c,actor,s);reward=0;count=0
+    for item in info['missions']:
+     if item['claimed'] or item['progress']<item['target']:continue
+     c.execute('INSERT INTO mission_claims VALUES(?,?,?,?)',(actor,info['day'],item['kind'],item['reward']));reward+=item['reward'];count+=1
+    if reward:adjust(c,actor,reward,'일일 미션 일괄 수령',False)
+    return dict(ok=True,reward=reward,count=count)
    if path=='mission/claim':
     ensure(c,actor,context.get('name'));kind=b.get('kind');info=mission_state(c,actor,s)
     item=next((m for m in info['missions'] if m['kind']==kind),None)
@@ -576,7 +583,7 @@ def game_stats(uid):
   return dict(games=rows,recent=recent,scope='게임 19종 · 복권은 1장=1판 · 완료된 판만 집계 · 수수료 반영 · 승리는 반환액이 베팅액보다 큰 판')
 
 
-def weekly_ranking(c,day,end,s):
+def weekly_ranking(c,day,end,s,limit=20):
  start=datetime.fromisoformat(day).replace(tzinfo=ZoneInfo(s['timezone'])).timestamp();stop=datetime.fromisoformat(end).replace(tzinfo=ZoneInfo(s['timezone'])).timestamp()
  queries={
  'chat':("SELECT uid,SUM(amount) score FROM activity WHERE day>=? AND day<? AND kind='chat' GROUP BY uid HAVING score>0",(day,end)),
@@ -584,7 +591,7 @@ def weekly_ranking(c,day,end,s):
  'games':('SELECT uid,SUM(payout-bet) score FROM game_results WHERE created>=? AND created<? GROUP BY uid HAVING score>0',(start,stop))}
  out={}
  for kind,(query,args) in queries.items():
-  out[kind]=[dict(r) for r in c.execute('SELECT q.uid,u.name,q.score FROM ('+query+') q JOIN users u ON q.uid=u.id ORDER BY q.score DESC,q.uid LIMIT 20',args)]
+  out[kind]=[dict(r) for r in c.execute('SELECT q.uid,u.name,q.score FROM ('+query+') q JOIN users u ON q.uid=u.id ORDER BY q.score DESC,q.uid LIMIT ?',(*args,limit))]
  return out
 
 def weekly_tick(c,s):
@@ -605,3 +612,35 @@ def weekly_board():
   row=c.execute("SELECT * FROM weekly_periods WHERE status='active' ORDER BY day DESC LIMIT 1").fetchone();cfg=json.loads(row['config'])
   previous=c.execute("SELECT * FROM weekly_periods WHERE status='done' ORDER BY day DESC LIMIT 1").fetchone()
   return dict(day=row['day'],ends=row['ends'],config=cfg,rankings=weekly_ranking(c,row['day'],row['ends'],cfg),previous=dict(day=previous['day'],rankings=json.loads(previous['snapshot'])) if previous else None)
+
+
+def insights(uid,admin=False,period='week',game=''):
+ with db() as c:
+  s=settings(c);day=today(s);start=day if period=='today' else day.replace(day=1) if period=='month' else day-timedelta(days=day.weekday());previous=start-(day-start+timedelta(days=1))
+  utc=lambda d:datetime.combine(d,datetime.min.time(),ZoneInfo(s['timezone'])).astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%d %H:%M:%S')
+  reasons=[v[0]+suffix for k,v in games.CATALOG.items() if not game or k==game for suffix in (' 베팅',' 정산')]
+  if not game:reasons+=['홀덤 바이인 예치','홀덤 테이블 반환','홀덤 모집 퇴장 반환','크래시 베팅','크래시 정산','복권 구매','복권 당첨']
+  sql='SELECT delta,created FROM ledger WHERE uid=? AND created>=? AND reason IN ('+','.join('?' for _ in reasons)+')'
+  rows=c.execute(sql,[uid,utc(previous),*reasons]).fetchall();daily={};old=0
+  for r in rows:
+   d=datetime.fromisoformat(r['created']).replace(tzinfo=ZoneInfo('UTC')).astimezone(ZoneInfo(s['timezone'])).date()
+   if d<start:old+=r['delta']
+   else:daily[str(d)]=daily.get(str(d),0)+r['delta']
+  u=c.execute('SELECT xp FROM users WHERE id=?',(uid,)).fetchone();rank=1+c.execute('SELECT COUNT(*) FROM users WHERE xp>? OR (xp=? AND id<?)',(u[0],u[0],uid)).fetchone()[0] if u else None
+  a=c.execute('SELECT * FROM attendance WHERE uid=?',(uid,)).fetchone()
+  result=dict(start=str(start),end=str(day),daily=daily,net=sum(daily.values()),previous=old,rank=rank,attendance=dict(a) if a else None,missions=mission_state(c,uid,s))
+  week=c.execute("SELECT * FROM weekly_periods WHERE status='active' ORDER BY day DESC LIMIT 1").fetchone()
+  result['weeklySelf']={}
+  if week:
+   boards=weekly_ranking(c,week['day'],week['ends'],json.loads(week['config']),1000000)
+   for kind,board in boards.items():
+    position=next((i for i,x in enumerate(board) if x['uid']==uid),None)
+    result['weeklySelf'][kind]=dict(rank=position+1,gap=board[position-1]['score']-board[position]['score'] if position else 0) if position is not None else None
+  if admin:
+   result['economy']=[dict(r) for r in c.execute("SELECT reason,SUM(CASE WHEN delta>0 THEN delta ELSE 0 END) incoming,SUM(CASE WHEN delta<0 THEN -delta ELSE 0 END) outgoing,COUNT(*) count FROM ledger WHERE created>=? GROUP BY reason ORDER BY count DESC",(utc(start),))]
+   result['circulation']=c.execute('SELECT COALESCE(SUM(xp),0) FROM users').fetchone()[0]
+   result['returns']=[dict(r) for r in c.execute("SELECT game,COUNT(*) samples,SUM(bet) bets,SUM(payout) payouts FROM game_rounds WHERE status='done' AND created>=? GROUP BY game",(datetime.fromisoformat(str(start)).replace(tzinfo=ZoneInfo(s['timezone'])).timestamp(),))]
+  if admin:
+   for row in result['returns']:
+    row['expected']=games.odds_preview(s,row['game'],None,100)
+  return result

@@ -145,7 +145,15 @@ async def profile(i:discord.Interaction):
   core.ensure(c,str(i.user.id),i.user.display_name);return core.user(c,str(i.user.id))
  u=await database(read,True)
  e=discord.Embed(title=i.user.display_name,color=0x9d85ff,description=f"Lv. **{u['level']}** · **{u['xp']:,} 띵조코인**\n다음 레벨까지 {u['nextXP']-u['xp']:,} 띵조코인")
- await i.followup.send(embed=e,ephemeral=True)
+ info=await asyncio.to_thread(core.insights,str(i.user.id))
+ e.title='🪪 '+i.user.display_name
+ e.add_field(name='🏆 서버 순위',value=str(info['rank'])+'위')
+ e.add_field(name='📅 연속 출석',value=str(info['attendance']['streak'] if info['attendance'] else 0)+'일')
+ e.add_field(name='🎯 오늘 미션',value='\n'.join(m['name']+f" {m['progress']}/{m['target']}"+(' ✅' if m['claimed'] else '') for m in info['missions']['missions']),inline=False)
+ v=discord.ui.View(timeout=180)
+ for label,callback in [('📅 출석',attendance.callback),('🎁 보상 모두 받기',claim_all),('📊 전적',stats_command.callback)]:
+  b=discord.ui.Button(label=label);b.callback=callback;v.add_item(b)
+ await i.followup.send(embed=e,view=v,ephemeral=True)
 
 @tree.command(name='랭킹',description='서버 띵조코인 상위 10명을 확인해요')
 async def ranking(i:discord.Interaction):
@@ -447,6 +455,12 @@ async def main():
   message='봇 로그인에 실패했습니다. 호스팅의 DISCORD_TOKEN을 확인하세요.'
   await asyncio.to_thread(command_status,state='error',count=0,message=message)
   raise SystemExit(message)
+async def claim_all(i):
+ await i.response.defer(ephemeral=True)
+ try:
+  r=await operation(i,'mission/claim-all',{});await i.followup.send(f"🎁 {r['count']}개 미션 · +{r['reward']:,} 띵조코인",ephemeral=True)
+ except (ValueError,PermissionError) as e:await command_error(i,e)
+
 class BetModal(discord.ui.Modal):
  def __init__(self,r):
   super().__init__(title='💰 베팅액 변경');self.r=r

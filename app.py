@@ -106,6 +106,7 @@ class Handler(BaseHTTPRequestHandler):
      core.ensure(c,me['id'],me.get('global_name') or me['username']);c.execute('INSERT INTO sessions VALUES(?,?,?,?,?)',(digest(session),me['id'],me.get('global_name') or me['username'],secrets.token_urlsafe(24),time.time()+86400))
     return self.send(302,b'',headers={'Location':'/','Set-Cookie':self.cookie_header('orbit_session',session,86400)})
    who=self.identity()
+   if p.path=='/api/insights':return self.send(200,core.insights(who['id'],who['admin'],query.get('period',['week'])[0],query.get('game',[''])[0]))
    if p.path=='/api/game-stats':return self.send(200,core.game_stats(who['id']))
    if p.path=='/api/missions':return self.send(200,core.missions(who['id']))
    if p.path=='/api/weekly':return self.send(200,core.weekly_board())
