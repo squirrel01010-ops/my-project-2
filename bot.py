@@ -294,6 +294,11 @@ async def on_message(message):
  await enqueue_chat(mid,payload)
 
 async def enqueue_chat(mid,payload):
+ # The live event pays in one atomic transaction, without waiting for a worker.
+ try:
+  return await asyncio.to_thread(core.activity,payload['uid'],payload['name'],'chat',payload['channel'],payload['roles'],payload['category'],stamp=payload['stamp'],message_id=str(mid))
+ except Exception as error:
+  logging.warning('Immediate chat payment failed; queuing retry: %s',type(error).__name__)
  for attempt in range(6):
   try:
    await asyncio.to_thread(core.queue_chat,mid,payload)

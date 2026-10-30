@@ -6,12 +6,21 @@ import core,bot
 class ChatDelivery(unittest.IsolatedAsyncioTestCase):
  async def test_lock_retry_and_uncached_author(self):
   message=SimpleNamespace(id=123,guild=SimpleNamespace(id=456),author=SimpleNamespace(id=789,bot=False,display_name='tester'),channel=SimpleNamespace(id=10,parent=SimpleNamespace(category_id=20)))
-  with patch.object(bot,'GUILD_ID',456),patch.object(core,'queue_chat',side_effect=[sqlite3.OperationalError('database is locked'),True]) as queued,patch.object(core,'deliver_chat',return_value=True) as delivered,patch.object(bot.asyncio,'sleep',new_callable=AsyncMock):
+  with patch.object(bot,'GUILD_ID',456),patch.object(core,'activity',side_effect=sqlite3.OperationalError('locked')),patch.object(core,'queue_chat',side_effect=[sqlite3.OperationalError('database is locked'),True]) as queued,patch.object(core,'deliver_chat',return_value=True) as delivered,patch.object(bot.asyncio,'sleep',new_callable=AsyncMock):
    await bot.on_message(message)
    self.assertEqual(queued.call_count,2)
    self.assertEqual(queued.call_args_list[0],queued.call_args_list[1])
    self.assertEqual(queued.call_args.args[0],123)
    delivered.assert_called_once_with(123)
+ async def test_live_event_pays_before_return_without_queue_or_timer(self):
+  with tempfile.TemporaryDirectory() as d,patch.object(core,'DB',d+'/instant.db'),patch.object(bot,'GUILD_ID',456):
+   core.init()
+   message=SimpleNamespace(id=123,guild=SimpleNamespace(id=456),author=SimpleNamespace(id=789,bot=False,display_name='tester'),channel=SimpleNamespace(id=10))
+   with patch.object(core,'queue_chat',side_effect=AssertionError('Normal chat must pay directly')),patch.object(bot.asyncio,'sleep',side_effect=AssertionError('No scheduled wait')):
+    await bot.on_message(message)
+    with core.db() as c:self.assertEqual(core.user(c,'789')['xp'],25)
+    await bot.on_message(message)
+    with core.db() as c:self.assertEqual(core.user(c,'789')['xp'],25)
  def test_concurrent_burst_and_replays_paid_exactly_once(self):
   with tempfile.TemporaryDirectory() as d,patch.object(core,'DB',d+'/burst.db'):
    core.init()
